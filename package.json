@@ -2,21 +2,25 @@
   "name": "capture",
   "version": "1.0.0",
   "description": "A simple text editor with word count",
+  "type": "module",
   "main": "index.js",
   "scripts": {
-    "build": "node build.js",
-    "dev": "node build.js --dev & node server.js",
-    "start": "pnpm run dev"
+    "build": "vite build",
+    "dev": "vite",
+    "preview": "vite preview"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "Apache-2.0",
   "dependencies": {
     "@types/react": "19.0.2",
     "@types/react-dom": "19.0.2",
-    "esbuild": "0.24.2",
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "typescript": "5.7.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "vite": "^5.0.10"
   }
 }
