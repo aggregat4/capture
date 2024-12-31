@@ -383,10 +383,6 @@ const server = createServer((request, response) => {
   const isDev = process.env.NODE_ENV !== 'production';
   const basePath = isDev ? join(__dirname, '..', 'client') : join(__dirname, '..', 'dist');
   const indexPath = join(basePath, 'index.html');
-  // debug output
-  console.log('Request URL:', request.url);
-  console.log('Base path:', basePath);
-  console.log('Index path:', indexPath);
   try {
     let filePath;
     if (request.url === '/') {
