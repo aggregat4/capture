@@ -431,13 +431,30 @@ wss.on('connection', setupWSConnection);
 server.on('upgrade', (request, socket, head) => {
   // Only handle upgrade for WebSocket paths
   if (!request.url.startsWith('/ws/')) {
+    debug.error('Rejected upgrade for non-websocket path:', request.url);
     socket.destroy();
     return;
   }
 
+  debug.connection('Handling WebSocket upgrade request', {
+    url: request.url,
+    headers: request.headers,
+    protocol: request.headers['sec-websocket-protocol']
+  });
+
   wss.handleUpgrade(request, socket, head, ws => {
+    debug.connection('WebSocket upgrade successful, emitting connection');
     wss.emit('connection', ws, request);
   });
+});
+
+// Add error event handler for the WebSocket server
+wss.on('error', (error) => {
+  debug.error('WebSocket server error:', error);
+});
+
+server.on('error', (error) => {
+  debug.error('HTTP server error:', error);
 });
 
 server.listen(port, host, () => {
