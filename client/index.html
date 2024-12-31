@@ -6,13 +6,18 @@
     <title>Collaborative Editor</title>
     <link rel="icon" href="data:,">
     <style>
+        :root {
+            --vh: 1vh;
+        }
+        
         body, html {
             margin: 0;
             padding: 0;
             font-family: sans-serif;
             background: #f5f5f5;
             box-sizing: border-box;
-            height: 100vh;
+            height: 100vh; /* Fallback */
+            height: calc(var(--vh, 1vh) * 100);
             display: flex;
             flex-direction: column;
             font-size: 18px;
@@ -216,6 +221,30 @@
     </div>
     <div id="editor" contenteditable="false"></div>
     <footer>Disconnected - Editor disabled</footer>
+    <script>
+        // Handle viewport height for mobile browsers
+        function setVH() {
+            let vh = window.innerHeight * 0.01;
+            document.documentElement.style.setProperty('--vh', `${vh}px`);
+        }
+
+        // Set initial viewport height
+        setVH();
+
+        // Update on resize and orientation change
+        window.addEventListener('resize', setVH);
+        window.addEventListener('orientationchange', setVH);
+
+        // Handle virtual keyboard
+        if ('virtualKeyboard' in navigator) {
+            navigator.virtualKeyboard.overlaysContent = true;
+            
+            navigator.virtualKeyboard.addEventListener('geometrychange', (event) => {
+                const { height } = event.target.boundingRect;
+                document.body.style.height = `${window.innerHeight - height}px`;
+            });
+        }
+    </script>
     <script type="module" src="/src/app.js"></script>
 </body>
 </html>
