@@ -74,3 +74,13 @@
         padding: 0 10px;
     }
 }
+
+.connection-status {
+    color: #ff4444;
+    margin-right: 1rem;
+}
+
+[contenteditable=false] {
+    background-color: #f5f5f5;
+    cursor: not-allowed;
+}   

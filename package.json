@@ -18,11 +18,11 @@
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "typescript": "5.7.2",
-    "y-indexeddb": "^9.0.12",
-    "yjs": "^13.6.21"
+    "y-webrtc": "^10.3.0",
+    "yjs": "13.6.21"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.2.1",
-    "vite": "^5.0.10"
+    "@vitejs/plugin-react": "4.3.4",
+    "vite": "5.4.11"
   }
 }
