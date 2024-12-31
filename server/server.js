@@ -31,6 +31,14 @@ const host = process.env.HOST || 'localhost';
 const port = parseInt(process.env.PORT || '1234');
 const pingTimeout = 30000;
 
+// Debug logging
+const debug = {
+  connection: (...args) => console.log('🔌 [Connection]:', ...args),
+  document: (...args) => console.log('📄 [Document]:', ...args),
+  message: (...args) => console.log('📨 [Message]:', ...args),
+  error: (...args) => console.error('❌ [Error]:', ...args)
+};
+
 // Callback handler implementation
 const createCallbackHandler = (callback, timeout) => {
   let timer = null;
@@ -61,6 +69,7 @@ const messageAwareness = 1;
 const gcEnabled = process.env.GC !== 'false' && process.env.GC !== '0';
 
 const updateHandler = (update, origin, doc) => {
+  debug.document('Update received', { docName: doc.name, updateLength: update.length });
   const encoder = encoding.createEncoder();
   encoding.writeVarUint(encoder, messageSync);
   syncProtocol.writeUpdate(encoder, update);
@@ -69,14 +78,17 @@ const updateHandler = (update, origin, doc) => {
 };
 
 class WSSharedDoc extends Y.Doc {
-  constructor() {
+  constructor(name) {
     super({ gc: gcEnabled });
+    this.name = name;
     this.mux = mutex.createMutex();
     this.conns = new Map();
     this.awareness = new awarenessProtocol.Awareness(this);
     this.awareness.setLocalState(null);
+    debug.document('Created new document', { name });
 
     const awarenessChangeHandler = ({ added, updated, removed }, conn) => {
+      debug.document('Awareness changed', { added, updated, removed });
       const changedClients = added.concat(updated, removed);
       if (conn !== null) {
         const encoder = encoding.createEncoder();
@@ -101,6 +113,8 @@ const messageListener = (conn, doc, message) => {
     const encoder = encoding.createEncoder();
     const decoder = decoding.createDecoder(message);
     const messageType = decoding.readVarUint(decoder);
+    debug.message('Received message', { type: messageType === messageSync ? 'sync' : 'awareness', docName: doc.name });
+    
     switch (messageType) {
       case messageSync:
         encoding.writeVarUint(encoder, messageSync);
@@ -109,26 +123,25 @@ const messageListener = (conn, doc, message) => {
           send(doc, conn, encoding.toUint8Array(encoder));
         }
         break;
-      case messageAwareness: {
+      case messageAwareness:
         awarenessProtocol.applyAwarenessUpdate(
           doc.awareness,
           decoding.readVarUint8Array(decoder),
           conn
         );
         break;
-      }
     }
   } catch (err) {
-    console.error(err);
+    debug.error('Error processing message', err);
     doc.emit('error', [err]);
   }
 };
 
 const closeConn = (doc, conn) => {
   if (doc.conns.has(conn)) {
+    debug.connection('Closing connection', { docName: doc.name, remainingConns: doc.conns.size - 1 });
     const controlledIds = Array.from(doc.awareness.getStates().keys()).filter(
-      (client) =>
-        doc.awareness.getStates().get(client).clock === conn.clock
+      (client) => doc.awareness.getStates().get(client).clock === conn.clock
     );
     doc.conns.delete(conn);
     awarenessProtocol.removeAwarenessStates(
@@ -137,6 +150,7 @@ const closeConn = (doc, conn) => {
       null
     );
     if (doc.conns.size === 0 && !doc.gcEnabled) {
+      debug.document('Destroying document', { name: doc.name });
       doc.destroy();
     }
   }
@@ -155,6 +169,7 @@ const send = (doc, conn, m) => {
       err != null && closeConn(doc, conn);
     });
   } catch (e) {
+    debug.error('Error sending message', e);
     closeConn(doc, conn);
   }
 };
@@ -164,17 +179,25 @@ const setupWSConnection = (
   req,
   { docName = req.url.slice(1).split('?')[0], gc = true } = {}
 ) => {
+  debug.connection('New connection', { docName, ip: req.socket.remoteAddress });
   ws.binaryType = 'arraybuffer';
-  // get doc, initialize if it does not exist yet
+  
   const doc = map.setIfUndefined(docs, docName, () => {
-    const doc = new WSSharedDoc();
+    debug.document('Creating new document', { name: docName });
+    const doc = new WSSharedDoc(docName);
     doc.gcEnabled = gc;
     return doc;
   });
+  
   doc.conns.set(ws, new Set());
-  // listen and reply to events
+  debug.document('Connection added to document', { name: docName, totalConns: doc.conns.size });
+  
   ws.on('message', (message) => messageListener(ws, doc, new Uint8Array(message)));
-
+  ws.on('close', () => {
+    debug.connection('Connection closed', { docName });
+    closeConn(doc, ws);
+    clearInterval(pingInterval);
+  });
   // Check if connection is still alive
   let pongReceived = true;
   const pingInterval = setInterval(() => {
@@ -188,15 +211,12 @@ const setupWSConnection = (
       try {
         ws.ping();
       } catch (e) {
+        debug.error('Error pinging connection', e);
         closeConn(doc, ws);
         clearInterval(pingInterval);
       }
     }
   }, math.floor(pingTimeout / 2));
-  ws.on('close', () => {
-    closeConn(doc, ws);
-    clearInterval(pingInterval);
-  });
   ws.on('pong', () => {
     pongReceived = true;
   });
@@ -260,6 +280,7 @@ const server = createServer((request, response) => {
       response.writeHead(200, { 'Content-Type': 'text/html' });
       response.end(indexContent);
     } catch (err) {
+      debug.error('Error serving index.html', err);
       response.writeHead(500);
       response.end('Internal Server Error');
     }
@@ -275,5 +296,5 @@ server.on('upgrade', (request, socket, head) => {
 });
 
 server.listen(port, host, () => {
-  console.log(`running at '${host}' on port ${port}`);
+  console.log(`🚀 Server running at 'http://${host}:${port}'`);
 }); 
