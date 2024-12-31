@@ -384,9 +384,8 @@ const server = createServer((request, response) => {
   const basePath = isDev ? join(__dirname, '..', 'client') : join(__dirname, '..', 'dist');
   const indexPath = join(basePath, 'index.html');
 
-  // Don't handle WebSocket paths in the regular request handler
-  // They will be handled by the upgrade event handler
-  if (request.headers.upgrade && request.headers.upgrade.toLowerCase() === 'websocket') {
+  // Skip handling WebSocket paths in the HTTP handler completely
+  if (request.url.startsWith('/ws/')) {
     response.end();
     return;
   }
