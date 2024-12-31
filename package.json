@@ -4,13 +4,17 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"node server/server.js\" \"vite client\"",
+    "dev:server": "node server/server.js",
+    "dev:client": "vite client",
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "build": "vite build client",
     "preview": "vite preview client"
   },
   "dependencies": {
+    "lib0": "^0.2.87",
     "ws": "^8.13.0",
     "y-protocols": "^1.0.6",
+    "source-map-support": "^0.5.21",
     "yjs": "^13.6.7"
   },
   "devDependencies": {

@@ -8,5 +8,11 @@ export default defineConfig({
         ws: true
       }
     }
+  },
+  optimizeDeps: {
+    include: ['yjs', 'lib0']
+  },
+  resolve: {
+    dedupe: ['yjs']
   }
 }) 

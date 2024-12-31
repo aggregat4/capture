@@ -241,46 +241,43 @@ const setupWSConnection = (
 // Create and start the server
 const wss = new WebSocketServer({ noServer: true });
 const server = createServer((request, response) => {
-  const distPath = join(__dirname, '..', 'dist');
-  const indexPath = join(distPath, 'index.html');
-
+  const isDev = process.env.NODE_ENV !== 'production';
+  const basePath = isDev ? join(__dirname, '..', 'client') : join(__dirname, '..', 'dist');
+  const indexPath = join(basePath, 'index.html');
+  // debug output
+  console.log('Request URL:', request.url);
+  console.log('Base path:', basePath);
+  console.log('Index path:', indexPath);
   try {
     let filePath;
     if (request.url === '/') {
       filePath = indexPath;
     } else {
-      // Remove leading slash and join with dist path
-      filePath = join(distPath, request.url.slice(1));
+      filePath = join(basePath, request.url);
     }
 
-    // Try to read the file
     const content = readFileSync(filePath);
-    
-    // Set content type based on file extension
     const ext = filePath.split('.').pop();
-    const contentTypes = {
+    const contentType = {
       'html': 'text/html',
-      'js': 'application/javascript',
+      'js': 'text/javascript',
       'css': 'text/css',
       'png': 'image/png',
       'jpg': 'image/jpeg',
       'jpeg': 'image/jpeg',
-      'gif': 'image/gif',
-      'svg': 'image/svg+xml',
-      'ico': 'image/x-icon'
-    };
-    
-    const contentType = contentTypes[ext] || 'application/octet-stream';
+      'gif': 'image/gif'
+    }[ext] || 'text/plain';
+
     response.writeHead(200, { 'Content-Type': contentType });
     response.end(content);
-  } catch (error) {
-    // If file not found, serve index.html for client-side routing
-    try {
-      const indexContent = readFileSync(indexPath);
-      response.writeHead(200, { 'Content-Type': 'text/html' });
-      response.end(indexContent);
-    } catch (err) {
-      debug.error('Error serving index.html', err);
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      // File not found, return 404 without logging
+      response.writeHead(404);
+      response.end('Not Found');
+    } else {
+      // Log other errors
+      debug.error('Error serving file', err);
       response.writeHead(500);
       response.end('Internal Server Error');
     }
