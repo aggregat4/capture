@@ -2,15 +2,13 @@
   "compilerOptions": {
     "target": "ES2020",
     "module": "ES2020",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "outDir": "./dist",
-    "lib": ["ES2020"],
-    "types": ["node"]
+    "jsx": "react-jsx",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"]
   },
-  "include": ["server/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["src"]
 } 
