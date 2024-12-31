@@ -16,6 +16,8 @@ import { parseInt } from 'lib0/number';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { readFileSync } from 'fs';
+import { LeveldbPersistence } from 'y-leveldb';
+import { mkdirSync, existsSync } from 'fs';
 
 // Get the directory name of the current module
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -38,6 +40,15 @@ const debug = {
   message: (...args) => console.log('📨 [Message]:', ...args),
   error: (...args) => console.error('❌ [Error]:', ...args)
 };
+
+// Storage configuration
+const storageLocation = join(__dirname, 'storage');
+
+// Ensure storage directory exists
+if (!existsSync(storageLocation)) {
+  mkdirSync(storageLocation, { recursive: true });
+  debug.document('Created storage directory:', storageLocation);
+}
 
 // Callback handler implementation
 const createCallbackHandler = (callback, timeout) => {
@@ -68,6 +79,40 @@ const messageSync = 0;
 const messageAwareness = 1;
 const gcEnabled = process.env.GC !== 'false' && process.env.GC !== '0';
 
+// Initialize LevelDB persistence
+const ldb = new LeveldbPersistence(storageLocation);
+
+// Handle process termination for cleanup
+const cleanup = async () => {
+  debug.document('Starting server cleanup...');
+  try {
+    // Wait for all documents to finish pending operations
+    const promises = Array.from(docs.values()).map(async (doc) => {
+      try {
+        const update = Y.encodeStateAsUpdate(doc);
+        await ldb.storeUpdate(doc.name, update);
+      } catch (err) {
+        debug.error('Error storing final document state', { name: doc.name, error: err });
+      }
+    });
+    
+    await Promise.all(promises);
+    
+    if (ldb) {
+      await ldb.destroy();
+      debug.document('Database destroyed successfully');
+    }
+    
+    process.exit(0);
+  } catch (err) {
+    debug.error('Error during cleanup', err);
+    process.exit(1);
+  }
+};
+
+process.on('SIGTERM', cleanup);
+process.on('SIGINT', cleanup);
+
 const updateHandler = (update, origin, doc) => {
   debug.document('Update received', { 
     docName: doc.name, 
@@ -94,6 +139,44 @@ class WSSharedDoc extends Y.Doc {
     this.awareness = new awarenessProtocol.Awareness(this);
     this.awareness.setLocalState(null);
     debug.document('Created new document', { name });
+
+    // Load initial state from storage
+    ldb.getYDoc(name).then(async (persistedYDoc) => {
+      if (persistedYDoc) {
+        try {
+          Y.applyUpdate(this, Y.encodeStateAsUpdate(persistedYDoc));
+          debug.document('Loaded document from storage', { name });
+        } catch (err) {
+          debug.error('Error loading document from storage', { name, error: err });
+        }
+      }
+    }).catch(err => {
+      debug.error('Error retrieving document from storage', { name, error: err });
+    });
+
+    // Store updates with error handling and debouncing
+    let updateTimeout = null;
+    const storeUpdate = async (update) => {
+      try {
+        await ldb.storeUpdate(name, update);
+        debug.document('Stored update to disk', { name });
+      } catch (err) {
+        debug.error('Error storing update', { name, error: err });
+      }
+    };
+
+    this.on('update', async (update) => {
+      // Clear existing timeout if there is one
+      if (updateTimeout) {
+        clearTimeout(updateTimeout);
+      }
+      
+      // Debounce updates to reduce disk writes
+      updateTimeout = setTimeout(() => {
+        storeUpdate(update);
+        updateTimeout = null;
+      }, 200); // Debounce for 200ms
+    });
 
     const awarenessChangeHandler = ({ added, updated, removed }, conn) => {
       debug.document('Awareness changed', { added, updated, removed });
