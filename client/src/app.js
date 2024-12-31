@@ -1,4 +1,12 @@
 import * as Y from 'yjs'
+import * as syncProtocol from 'y-protocols/sync'
+import * as awarenessProtocol from 'y-protocols/awareness'
+import * as encoding from 'lib0/encoding'
+import * as decoding from 'lib0/decoding'
+
+// Message types
+const messageSync = 0;
+const messageAwareness = 1;
 
 // Create a WebSocket connection to our server
 const wsProvider = (doc) => {
@@ -7,15 +15,49 @@ const wsProvider = (doc) => {
   
   ws.binaryType = 'arraybuffer';
   
+  const sendMessage = (message) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(message);
+    }
+  };
+  
   ws.onopen = () => {
     console.log('WebSocket connection opened successfully');
+    // Send sync step 1 when connection opens
+    const encoder = encoding.createEncoder();
+    encoding.writeVarUint(encoder, messageSync);
+    syncProtocol.writeSyncStep1(encoder, doc);
+    sendMessage(encoding.toUint8Array(encoder));
   };
   
   ws.onmessage = (event) => {
     console.log('Received WebSocket message');
-    doc.transact(() => {
-      Y.applyUpdate(doc, new Uint8Array(event.data));
-    });
+    const message = new Uint8Array(event.data);
+    const encoder = encoding.createEncoder();
+    const decoder = decoding.createDecoder(message);
+    const messageType = decoding.readVarUint(decoder);
+    console.log('Message type:', messageType === messageSync ? 'sync' : 'awareness');
+    
+    switch (messageType) {
+      case messageSync: {
+        console.log('Processing sync message');
+        encoding.writeVarUint(encoder, messageSync);
+        syncProtocol.readSyncMessage(decoder, encoder, doc, sendMessage);
+        console.log('Current document content:', doc.getText('editor').toString());
+        if (encoding.length(encoder) > 1) {
+          const response = encoding.toUint8Array(encoder);
+          console.log('Sending sync response', {
+            responseLength: response.length,
+            responseContent: Array.from(response).map(byte => byte.toString(16)).join(' ')
+          });
+          sendMessage(response);
+        }
+        break;
+      }
+      case messageAwareness:
+        awarenessProtocol.applyAwarenessUpdate(doc.awareness, decoding.readVarUint8Array(decoder), null);
+        break;
+    }
   };
 
   ws.onerror = (error) => {
@@ -63,22 +105,41 @@ document.addEventListener('DOMContentLoaded', () => {
   let isConnected = false;
   let isUpdating = false;
 
+  // Initialize awareness
+  const awareness = new awarenessProtocol.Awareness(doc);
+  awareness.setLocalState(null);
+
   // Set up WebSocket provider
   const provider = wsProvider(doc);
   
+  // Handle document updates
+  doc.on('update', (update, origin) => {
+    console.log('Document update:', {
+      updateLength: update.length,
+      updateContent: Array.from(update).map(byte => byte.toString(16)).join(' '),
+      origin
+    });
+    // We want to send all local updates to the server
+    const encoder = encoding.createEncoder();
+    encoding.writeVarUint(encoder, messageSync);
+    syncProtocol.writeUpdate(encoder, update);
+    const message = encoding.toUint8Array(encoder);
+    console.log('Sending update to server:', {
+      messageLength: message.length,
+      messageContent: Array.from(message).map(byte => byte.toString(16)).join(' ')
+    });
+    provider.ws.send(message);
+  });
+
   provider.on('status', ({ status }) => {
     console.log('Connection status:', status);
     isConnected = status === 'connected';
-    editor.contentEditable = String(isConnected); // Convert boolean to string
+    editor.contentEditable = String(isConnected);
     
     statusBar.textContent = isConnected ? 
       'Connected - Editor enabled' : 
       'Disconnected - Editor disabled';
     statusBar.className = isConnected ? 'connected' : '';
-    
-    if (!isConnected) {
-      editor.textContent = 'Connecting to server...';
-    }
   });
 
   // Observe changes to the shared text
@@ -87,20 +148,31 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!isConnected) return;
     
     try {
-      if (editor && event.target.toString() !== editor.innerHTML) {
+      const newContent = event.target.toString();
+      if (editor && editor.textContent !== newContent) {
+        // Store current selection if it exists
+        let cursorPosition = null;
         const selection = window.getSelection();
-        const range = selection?.getRangeAt(0);
-        const start = range?.startOffset || 0;
-        const end = range?.endOffset || 0;
+        if (selection && selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0);
+          if (range && editor.contains(range.startContainer)) {
+            cursorPosition = {
+              start: range.startOffset,
+              end: range.endOffset
+            };
+          }
+        }
 
-        editor.innerHTML = event.target.toString();
+        // Update content
+        editor.textContent = newContent;
 
-        // Restore cursor position
-        if (selection && range && editor.firstChild) {
-          range.setStart(editor.firstChild, start);
-          range.setEnd(editor.firstChild, end);
+        // Restore cursor position if we had one
+        if (cursorPosition && editor.firstChild) {
+          const newRange = document.createRange();
+          newRange.setStart(editor.firstChild, Math.min(cursorPosition.start, newContent.length));
+          newRange.setEnd(editor.firstChild, Math.min(cursorPosition.end, newContent.length));
           selection.removeAllRanges();
-          selection.addRange(range);
+          selection.addRange(newRange);
         }
       }
     } catch (error) {
@@ -113,7 +185,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!isConnected) return;
     
     try {
-      const content = editor.innerHTML;
+      const content = editor.textContent;
       if (content !== text.toString()) {
         isUpdating = true;
         doc.transact(() => {

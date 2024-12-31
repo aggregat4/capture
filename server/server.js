@@ -69,11 +69,19 @@ const messageAwareness = 1;
 const gcEnabled = process.env.GC !== 'false' && process.env.GC !== '0';
 
 const updateHandler = (update, origin, doc) => {
-  debug.document('Update received', { docName: doc.name, updateLength: update.length });
+  debug.document('Update received', { 
+    docName: doc.name, 
+    updateLength: update.length,
+    updateContent: Array.from(update).map(byte => byte.toString(16)).join(' ')
+  });
   const encoder = encoding.createEncoder();
   encoding.writeVarUint(encoder, messageSync);
   syncProtocol.writeUpdate(encoder, update);
   const message = encoding.toUint8Array(encoder);
+  debug.document('Broadcasting update to clients', {
+    messageLength: message.length,
+    messageContent: Array.from(message).map(byte => byte.toString(16)).join(' ')
+  });
   doc.conns.forEach((_, conn) => send(doc, conn, message));
 };
 
@@ -113,14 +121,46 @@ const messageListener = (conn, doc, message) => {
     const encoder = encoding.createEncoder();
     const decoder = decoding.createDecoder(message);
     const messageType = decoding.readVarUint(decoder);
-    debug.message('Received message', { type: messageType === messageSync ? 'sync' : 'awareness', docName: doc.name });
+    debug.message('Received message', { 
+      type: messageType === messageSync ? 'sync' : 'awareness', 
+      docName: doc.name,
+      messageLength: message.length,
+      messageContent: Array.from(message).map(byte => byte.toString(16)).join(' ')
+    });
     
     switch (messageType) {
       case messageSync:
+        debug.message('Processing sync message');
         encoding.writeVarUint(encoder, messageSync);
-        syncProtocol.readSyncMessage(decoder, encoder, doc, conn);
-        if (encoding.length(encoder) > 1) {
-          send(doc, conn, encoding.toUint8Array(encoder));
+        
+        // Get the sync step from the message
+        const syncStep = syncProtocol.readSyncMessage(decoder, encoder, doc, conn);
+        debug.message('Sync step:', { step: syncStep });
+        
+        if (syncStep === 1) {
+          // If this is sync step 1, send the full document state
+          const state = Y.encodeStateAsUpdate(doc);
+          const encoder2 = encoding.createEncoder();
+          encoding.writeVarUint(encoder2, messageSync);
+          syncProtocol.writeUpdate(encoder2, state);
+          const response = encoding.toUint8Array(encoder2);
+          debug.message('Sending full document state', {
+            responseLength: response.length,
+            responseContent: Array.from(response).map(byte => byte.toString(16)).join(' '),
+            docContent: doc.getText('editor').toString()
+          });
+          send(doc, conn, response);
+        } else if (encoding.length(encoder) > 1) {
+          // For other sync steps, send the normal response
+          const response = encoding.toUint8Array(encoder);
+          debug.message('Sending sync response', {
+            responseLength: response.length,
+            responseContent: Array.from(response).map(byte => byte.toString(16)).join(' '),
+            docContent: doc.getText('editor').toString()
+          });
+          send(doc, conn, response);
+        } else {
+          debug.message('No sync response needed');
         }
         break;
       case messageAwareness:
@@ -149,10 +189,6 @@ const closeConn = (doc, conn) => {
       controlledIds,
       null
     );
-    if (doc.conns.size === 0 && !doc.gcEnabled) {
-      debug.document('Destroying document', { name: doc.name });
-      doc.destroy();
-    }
   }
   conn.close();
 };
@@ -174,6 +210,16 @@ const send = (doc, conn, m) => {
   }
 };
 
+// Add debug logging for document state
+const logDocumentState = (doc) => {
+  const state = doc.getText('editor').toString();
+  debug.document('Current document state:', {
+    name: doc.name,
+    length: state.length,
+    content: state
+  });
+};
+
 const setupWSConnection = (
   ws,
   req,
@@ -189,6 +235,9 @@ const setupWSConnection = (
     return doc;
   });
   
+  // Log the document state when a new client connects
+  logDocumentState(doc);
+  
   doc.conns.set(ws, new Set());
   debug.document('Connection added to document', { name: docName, totalConns: doc.conns.size });
   
@@ -198,6 +247,7 @@ const setupWSConnection = (
     closeConn(doc, ws);
     clearInterval(pingInterval);
   });
+  
   // Check if connection is still alive
   let pongReceived = true;
   const pingInterval = setInterval(() => {
@@ -225,7 +275,13 @@ const setupWSConnection = (
   const encoder = encoding.createEncoder();
   encoding.writeVarUint(encoder, messageSync);
   syncProtocol.writeSyncStep1(encoder, doc);
-  send(doc, ws, encoding.toUint8Array(encoder));
+  const syncStep1Message = encoding.toUint8Array(encoder);
+  debug.message('Sending initial sync step 1', {
+    messageLength: syncStep1Message.length,
+    messageContent: Array.from(syncStep1Message).map(byte => byte.toString(16)).join(' ')
+  });
+  send(doc, ws, syncStep1Message);
+  
   const awarenessStates = doc.awareness.getStates();
   if (awarenessStates.size > 0) {
     const encoder = encoding.createEncoder();
