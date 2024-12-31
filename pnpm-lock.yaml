@@ -15,7 +15,7 @@ importers:
         specifier: 19.0.2
         version: 19.0.2(@types/react@19.0.2)
       lib0:
-        specifier: ^0.2.87
+        specifier: ^0.2.99
         version: 0.2.99
       react:
         specifier: 19.0.0
@@ -27,7 +27,7 @@ importers:
         specifier: 5.7.2
         version: 5.7.2
       ws:
-        specifier: ^8.16.0
+        specifier: ^8.18.0
         version: 8.18.0
       y-protocols:
         specifier: ^1.0.6
