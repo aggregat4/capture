@@ -99,7 +99,7 @@ const wsProvider = (doc) => {
 // Initialize the editor when the DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
   const editor = document.getElementById('editor');
-  const statusBar = document.getElementById('status');
+  const statusBar = document.querySelector('footer');
   const doc = new Y.Doc();
   const text = doc.getText('editor');
   let isConnected = false;
