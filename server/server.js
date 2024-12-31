@@ -383,11 +383,11 @@ const server = createServer((request, response) => {
   const isDev = process.env.NODE_ENV !== 'production';
   const basePath = isDev ? join(__dirname, '..', 'client') : join(__dirname, '..', 'dist');
   const indexPath = join(basePath, 'index.html');
-  
-  // Skip static file serving for WebSocket paths
-  if (request.url.startsWith('/ws/')) {
-    response.writeHead(426, { 'Content-Type': 'text/plain' });
-    response.end('Upgrade Required');
+
+  // Don't handle WebSocket paths in the regular request handler
+  // They will be handled by the upgrade event handler
+  if (request.headers.upgrade && request.headers.upgrade.toLowerCase() === 'websocket') {
+    response.end();
     return;
   }
 
