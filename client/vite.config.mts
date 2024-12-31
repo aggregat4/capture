@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite'
+import { resolve } from 'path'
 
 export default defineConfig({
   server: {
@@ -8,6 +9,10 @@ export default defineConfig({
         ws: true
       }
     }
+  },
+  build: {
+    outDir: '../dist',
+    emptyOutDir: true
   },
   optimizeDeps: {
     include: ['yjs', 'lib0']
