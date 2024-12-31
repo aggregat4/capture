@@ -8,10 +8,37 @@ import * as decoding from 'lib0/decoding'
 const messageSync = 0;
 const messageAwareness = 1;
 
+// Configuration management
+const CONFIG_KEY = 'editor_config';
+const defaultConfig = {
+  documentName: 'default-doc',
+  password: ''
+};
+
+const loadConfig = () => {
+  const stored = localStorage.getItem(CONFIG_KEY);
+  return stored ? JSON.parse(stored) : defaultConfig;
+};
+
+const saveConfig = (config) => {
+  localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+};
+
 // Create a WebSocket connection to our server
 const wsProvider = (doc) => {
   console.log('Creating new WebSocket connection...');
-  const ws = new WebSocket(`ws://${window.location.host}/default-doc`);
+  const config = loadConfig();
+  const wsUrl = `ws://${window.location.host}/${config.documentName}`;
+  const ws = new WebSocket(wsUrl);
+  if (config.password) {
+    ws.onopen = () => {
+      const authMessage = {
+        type: 'auth',
+        password: config.password
+      };
+      ws.send(JSON.stringify(authMessage));
+    };
+  }
   
   ws.binaryType = 'arraybuffer';
   
@@ -100,6 +127,30 @@ const wsProvider = (doc) => {
 document.addEventListener('DOMContentLoaded', () => {
   const editor = document.getElementById('editor');
   const statusBar = document.querySelector('footer');
+  const configSection = document.querySelector('.config-section');
+  const configToggle = document.querySelector('.config-toggle');
+  
+  // Load and display current config
+  const config = loadConfig();
+  document.getElementById('docName').value = config.documentName;
+  document.getElementById('docPassword').value = config.password;
+  
+  // Handle config toggle
+  configToggle.addEventListener('click', () => {
+    configSection.classList.toggle('visible');
+    configToggle.classList.toggle('active');
+  });
+  
+  // Handle config updates
+  document.getElementById('saveConfig').addEventListener('click', () => {
+    const newConfig = {
+      documentName: document.getElementById('docName').value,
+      password: document.getElementById('docPassword').value
+    };
+    saveConfig(newConfig);
+    window.location.reload(); // Reload to reconnect with new config
+  });
+
   const doc = new Y.Doc();
   const text = doc.getText('editor');
   let isConnected = false;

@@ -24,6 +24,9 @@
             z-index: 2;
             box-shadow: 0 2px 8px rgba(0,0,0,0.2);
             text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .header h1 {
@@ -31,6 +34,85 @@
             font-size: 1.5rem;
             max-width: 66ch;
             padding: 0 20px;
+        }
+
+        .config-toggle {
+            position: absolute;
+            right: 1rem;
+            padding: 0.5rem;
+            background: transparent;
+            border: 1px solid #007bff;
+            color: #007bff;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .config-toggle:hover {
+            background: #007bff;
+            color: white;
+        }
+
+        .config-toggle svg {
+            width: 16px;
+            height: 16px;
+            transition: transform 0.2s ease;
+        }
+
+        .config-toggle.active svg {
+            transform: rotate(180deg);
+        }
+
+        .config-section {
+            padding: 0;
+            background: #f5f5f5;
+            border-bottom: 1px solid #ddd;
+            margin-bottom: 0;
+            transition: all 0.3s ease;
+            max-height: 0;
+            opacity: 0;
+            overflow: hidden;
+        }
+        
+        .config-section.visible {
+            padding: 1rem;
+            max-height: 100px;
+            opacity: 1;
+        }
+        
+        .config-controls {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            max-width: calc(70ch - 40px);
+            margin: 0 auto;
+            width: 100%;
+        }
+        
+        .config-controls input {
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            flex: 1;
+        }
+        
+        .config-controls button {
+            padding: 0.5rem 1rem;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            white-space: nowrap;
+        }
+        
+        .config-controls button:hover {
+            background: #0056b3;
         }
 
         #editor {
@@ -74,6 +156,22 @@
             .header h1 {
                 max-width: 100%;
                 padding: 0 10px;
+                font-size: 1.2rem;
+            }
+
+            .config-toggle {
+                right: 0.5rem;
+                padding: 0.4rem;
+            }
+
+            .config-controls {
+                flex-direction: column;
+                padding: 0 10px;
+            }
+
+            .config-controls input,
+            .config-controls button {
+                width: 100%;
             }
 
             #editor {
@@ -95,7 +193,20 @@
 <body>
     <header class="header">
         <h1>Capture</h1>
+        <button class="config-toggle">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M19 9l-7 7-7-7"/>
+            </svg>
+            Settings
+        </button>
     </header>
+    <div class="config-section">
+        <div class="config-controls">
+            <input type="text" id="docName" placeholder="Document name">
+            <input type="password" id="docPassword" placeholder="Password (optional)">
+            <button id="saveConfig">Save Configuration</button>
+        </div>
+    </div>
     <div id="editor" contenteditable="false"></div>
     <footer>Disconnected - Editor disabled</footer>
     <script type="module" src="/src/app.js"></script>
