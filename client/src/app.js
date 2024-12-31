@@ -31,15 +31,7 @@ const wsProvider = (doc) => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = `${protocol}//${window.location.host}/ws/${config.documentName}`;
   const ws = new WebSocket(wsUrl);
-  if (config.password) {
-    ws.onopen = () => {
-      const authMessage = {
-        type: 'auth',
-        password: config.password
-      };
-      ws.send(JSON.stringify(authMessage));
-    };
-  }
+  let authenticationComplete = false;
   
   ws.binaryType = 'arraybuffer';
   
@@ -51,15 +43,58 @@ const wsProvider = (doc) => {
   
   ws.onopen = () => {
     console.log('WebSocket connection opened successfully');
-    // Send sync step 1 when connection opens
-    const encoder = encoding.createEncoder();
-    encoding.writeVarUint(encoder, messageSync);
-    syncProtocol.writeSyncStep1(encoder, doc);
-    sendMessage(encoding.toUint8Array(encoder));
+    if (config.password) {
+      const authMessage = {
+        type: 'auth',
+        password: config.password
+      };
+      ws.send(JSON.stringify(authMessage));
+    } else {
+      authenticationComplete = true;
+      // Send sync step 1 when connection opens
+      const encoder = encoding.createEncoder();
+      encoding.writeVarUint(encoder, messageSync);
+      syncProtocol.writeSyncStep1(encoder, doc);
+      sendMessage(encoding.toUint8Array(encoder));
+    }
   };
   
   ws.onmessage = (event) => {
     console.log('Received WebSocket message');
+    
+    // Handle authentication response
+    if (!authenticationComplete && typeof event.data === 'string') {
+      try {
+        const response = JSON.parse(event.data);
+        if (response.type === 'auth') {
+          if (response.status === 'success') {
+            console.log('Authentication successful');
+            authenticationComplete = true;
+            // Send sync step 1 after successful authentication
+            const encoder = encoding.createEncoder();
+            encoding.writeVarUint(encoder, messageSync);
+            syncProtocol.writeSyncStep1(encoder, doc);
+            sendMessage(encoding.toUint8Array(encoder));
+          } else {
+            console.error('Authentication failed:', response.message);
+            const statusBar = document.querySelector('footer');
+            statusBar.textContent = 'Authentication failed - Invalid password';
+            statusBar.className = 'error';
+            ws.close();
+          }
+          return;
+        }
+      } catch (e) {
+        console.error('Error parsing auth response:', e);
+      }
+    }
+    
+    // Only process binary messages if authenticated
+    if (!authenticationComplete) {
+      console.error('Received message before authentication');
+      return;
+    }
+    
     const message = new Uint8Array(event.data);
     const encoder = encoding.createEncoder();
     const decoder = decoding.createDecoder(message);

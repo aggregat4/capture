@@ -32,6 +32,7 @@ const wsReadyStateClosed = 3;
 const host = process.env.HOST || 'localhost';
 const port = parseInt(process.env.PORT || '1234');
 const pingTimeout = 30000;
+const editorPassword = process.env.EDITOR_PASSWORD;
 
 // Debug logging
 const debug = {
@@ -201,6 +202,35 @@ class WSSharedDoc extends Y.Doc {
 
 const messageListener = (conn, doc, message) => {
   try {
+    // Check if the connection is authenticated
+    if (!conn.isAuthenticated) {
+      try {
+        const authMessage = JSON.parse(message.toString());
+        if (authMessage.type === 'auth') {
+          if (editorPassword && authMessage.password === editorPassword) {
+            conn.isAuthenticated = true;
+            debug.connection('Client authenticated successfully');
+            // Send a success message back to the client
+            conn.send(JSON.stringify({ type: 'auth', status: 'success' }));
+            return;
+          } else {
+            debug.error('Authentication failed - invalid password');
+            conn.send(JSON.stringify({ type: 'auth', status: 'error', message: 'Invalid password' }));
+            closeConn(doc, conn);
+            return;
+          }
+        } else {
+          debug.error('Unauthenticated message received');
+          closeConn(doc, conn);
+          return;
+        }
+      } catch (e) {
+        debug.error('Invalid auth message format');
+        closeConn(doc, conn);
+        return;
+      }
+    }
+
     const encoder = encoding.createEncoder();
     const decoder = decoding.createDecoder(message);
     const messageType = decoding.readVarUint(decoder);
@@ -310,6 +340,7 @@ const setupWSConnection = (
 ) => {
   debug.connection('New connection', { docName, ip: req.socket.remoteAddress });
   ws.binaryType = 'arraybuffer';
+  ws.isAuthenticated = !editorPassword; // Auto-authenticate if no password is set
   
   const doc = map.setIfUndefined(docs, docName, () => {
     debug.document('Creating new document', { name: docName });
@@ -324,7 +355,17 @@ const setupWSConnection = (
   doc.conns.set(ws, new Set());
   debug.document('Connection added to document', { name: docName, totalConns: doc.conns.size });
   
-  ws.on('message', (message) => messageListener(ws, doc, new Uint8Array(message)));
+  ws.on('message', (message) => {
+    // Try to parse as JSON first for auth messages
+    if (!ws.isAuthenticated) {
+      messageListener(ws, doc, message);
+    } else if (message instanceof Buffer || message instanceof ArrayBuffer) {
+      messageListener(ws, doc, new Uint8Array(message));
+    } else {
+      debug.error('Invalid message format');
+      closeConn(doc, ws);
+    }
+  });
   ws.on('close', () => {
     debug.connection('Connection closed', { docName });
     closeConn(doc, ws);
