@@ -4,7 +4,7 @@ import { resolve } from 'path'
 export default defineConfig({
   server: {
     proxy: {
-      '/default-doc': {
+      '/ws': {
         target: 'ws://localhost:1234',
         ws: true
       }

@@ -306,7 +306,7 @@ const logDocumentState = (doc) => {
 const setupWSConnection = (
   ws,
   req,
-  { docName = req.url.slice(1).split('?')[0], gc = true } = {}
+  { docName = req.url.replace(/^\/ws\//, '').split('?')[0], gc = true } = {}
 ) => {
   debug.connection('New connection', { docName, ip: req.socket.remoteAddress });
   ws.binaryType = 'arraybuffer';
@@ -383,6 +383,14 @@ const server = createServer((request, response) => {
   const isDev = process.env.NODE_ENV !== 'production';
   const basePath = isDev ? join(__dirname, '..', 'client') : join(__dirname, '..', 'dist');
   const indexPath = join(basePath, 'index.html');
+  
+  // Skip static file serving for WebSocket paths
+  if (request.url.startsWith('/ws/')) {
+    response.writeHead(426, { 'Content-Type': 'text/plain' });
+    response.end('Upgrade Required');
+    return;
+  }
+
   try {
     let filePath;
     if (request.url === '/') {
@@ -422,6 +430,12 @@ const server = createServer((request, response) => {
 wss.on('connection', setupWSConnection);
 
 server.on('upgrade', (request, socket, head) => {
+  // Only handle upgrade for WebSocket paths
+  if (!request.url.startsWith('/ws/')) {
+    socket.destroy();
+    return;
+  }
+
   wss.handleUpgrade(request, socket, head, ws => {
     wss.emit('connection', ws, request);
   });

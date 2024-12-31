@@ -29,7 +29,7 @@ const wsProvider = (doc) => {
   console.log('Creating new WebSocket connection...');
   const config = loadConfig();
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${protocol}//${window.location.host}/${config.documentName}`;
+  const wsUrl = `${protocol}//${window.location.host}/ws/${config.documentName}`;
   const ws = new WebSocket(wsUrl);
   if (config.password) {
     ws.onopen = () => {
