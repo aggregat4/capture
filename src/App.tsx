@@ -1,7 +1,34 @@
 import { useEffect, useRef, useState } from 'react'
 import './App.css'
 import * as Y from 'yjs'
-import { WebrtcProvider } from 'y-webrtc'
+
+// Create a WebSocket connection to our server instead of using WebRTC
+const wsProvider = (doc: Y.Doc) => {
+  const ws = new WebSocket(`ws://${window.location.host}/ws`);
+  
+  ws.binaryType = 'arraybuffer';
+  
+  ws.onmessage = (event) => {
+    doc.transact(() => {
+      Y.applyUpdate(doc, new Uint8Array(event.data));
+    });
+  };
+
+  ws.onclose = () => {
+    console.log('WebSocket connection closed');
+  };
+
+  return {
+    ws,
+    destroy: () => ws.close(),
+    on: (event: string, callback: any) => {
+      if (event === 'status') {
+        ws.onopen = () => callback({ status: 'connected' });
+        ws.onclose = () => callback({ status: 'disconnected' });
+      }
+    }
+  };
+};
 
 function App() {
   const editorRef = useRef<HTMLDivElement>(null)
@@ -10,14 +37,12 @@ function App() {
   const [isConnected, setIsConnected] = useState(false)
   const isUpdatingRef = useRef(false)
 
-  // Initialize Y.js document and WebRTC connection
+  // Initialize Y.js document and WebSocket connection
   useEffect(() => {
-    console.log('Initializing WebRTC connection...')
+    console.log('Initializing WebSocket connection...')
     
-    // Set up WebRTC provider: the document should probably be a high entropy secret so we can securely
-    // collaborate on it and the password should be a secret shared amongst collaborators
-    // TODO: This means that in the app we need a way to either generate or input a document id and password
-    const provider = new WebrtcProvider('capture-document', doc, { password: 'secret-password' })
+    // Set up WebSocket provider
+    const provider = wsProvider(doc)
     
     provider.on('status', ({ status }: { status: 'connected' | 'disconnected' }) => {
       console.log('Connection status:', status)

@@ -11,6 +11,12 @@ import * as map from 'lib0/map';
 import * as mutex from 'lib0/mutex';
 import * as math from 'lib0/math';
 import { parseInt } from 'lib0/number';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+import { readFileSync } from 'fs';
+
+// Get the directory name of the current module
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // WebSocket connection states
 const wsReadyStateConnecting = 0;
@@ -212,9 +218,50 @@ const setupWSConnection = (
 
 // Create and start the server
 const wss = new WebSocketServer({ noServer: true });
-const server = createServer((_request, response) => {
-  response.writeHead(200, { 'Content-Type': 'text/plain' });
-  response.end('okay');
+const server = createServer((request, response) => {
+  const distPath = join(__dirname, '..', 'dist');
+  const indexPath = join(distPath, 'index.html');
+
+  try {
+    let filePath;
+    if (request.url === '/') {
+      filePath = indexPath;
+    } else {
+      // Remove leading slash and join with dist path
+      filePath = join(distPath, request.url.slice(1));
+    }
+
+    // Try to read the file
+    const content = readFileSync(filePath);
+    
+    // Set content type based on file extension
+    const ext = filePath.split('.').pop();
+    const contentTypes = {
+      'html': 'text/html',
+      'js': 'application/javascript',
+      'css': 'text/css',
+      'png': 'image/png',
+      'jpg': 'image/jpeg',
+      'jpeg': 'image/jpeg',
+      'gif': 'image/gif',
+      'svg': 'image/svg+xml',
+      'ico': 'image/x-icon'
+    };
+    
+    const contentType = contentTypes[ext] || 'application/octet-stream';
+    response.writeHead(200, { 'Content-Type': contentType });
+    response.end(content);
+  } catch (error) {
+    // If file not found, serve index.html for client-side routing
+    try {
+      const indexContent = readFileSync(indexPath);
+      response.writeHead(200, { 'Content-Type': 'text/html' });
+      response.end(indexContent);
+    } catch (err) {
+      response.writeHead(500);
+      response.end('Internal Server Error');
+    }
+  }
 });
 
 wss.on('connection', setupWSConnection);
