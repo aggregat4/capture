@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import 'source-map-support/register.js';
+
 import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import * as Y from 'yjs';
