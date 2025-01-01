@@ -2,6 +2,12 @@
 
 import 'source-map-support/register.js';
 
+// Load environment variables in development mode
+if (process.env.NODE_ENV !== 'production') {
+  const { config } = await import('dotenv');
+  config();
+}
+
 import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import * as Y from 'yjs';
@@ -34,6 +40,12 @@ const port = parseInt(process.env.PORT || '1234');
 const pingTimeout = 30000;
 const editorPassword = process.env.EDITOR_PASSWORD;
 
+// Validate required configuration
+if (!editorPassword) {
+  console.error('❌ EDITOR_PASSWORD environment variable is required');
+  process.exit(1);
+}
+
 // Debug logging
 const debug = {
   connection: (...args) => console.log('🔌 [Connection]:', ...args),
@@ -44,35 +56,11 @@ const debug = {
 
 // Storage configuration
 const storageLocation = join(__dirname, 'storage');
-
 // Ensure storage directory exists
 if (!existsSync(storageLocation)) {
   mkdirSync(storageLocation, { recursive: true });
   debug.document('Created storage directory:', storageLocation);
 }
-
-// Callback handler implementation
-const createCallbackHandler = (callback, timeout) => {
-  let timer = null;
-  let reply = null;
-  const cleanup = () => {
-    if (timer) {
-      clearTimeout(timer);
-    }
-    timer = null;
-    reply = null;
-  };
-  
-  timer = setTimeout(cleanup, timeout);
-  
-  return {
-    reply: (message) => {
-      reply = message;
-      cleanup();
-    },
-    getReply: () => reply
-  };
-};
 
 // Y.js document handling
 const docs = new Map();
@@ -204,33 +192,35 @@ const messageListener = (conn, doc, message) => {
   try {
     // Check if the connection is authenticated
     if (!conn.isAuthenticated) {
-      try {
-        const authMessage = JSON.parse(message.toString());
-        if (authMessage.type === 'auth') {
-          if (editorPassword && authMessage.password === editorPassword) {
-            conn.isAuthenticated = true;
-            debug.connection('Client authenticated successfully');
-            // Send a success message back to the client
-            conn.send(JSON.stringify({ type: 'auth', status: 'success' }));
-            return;
-          } else {
-            debug.error('Authentication failed - invalid password');
-            conn.send(JSON.stringify({ type: 'auth', status: 'error', message: 'Invalid password' }));
-            closeConn(doc, conn);
-            return;
-          }
+      debug.message('Processing auth message:', message);
+      
+      if (message && message.type === 'auth') {
+        if (editorPassword && message.password === editorPassword) {
+          conn.isAuthenticated = true;
+          debug.connection('Client authenticated successfully');
+          // Send a success message back to the client
+          conn.send(JSON.stringify({ type: 'auth', status: 'success' }));
+          return;
         } else {
-          debug.error('Unauthenticated message received');
+          debug.error('Authentication failed - invalid password', {
+            hasPassword: !!editorPassword,
+            receivedPassword: !!message.password
+          });
+          conn.send(JSON.stringify({ type: 'auth', status: 'error', message: 'Invalid password' }));
           closeConn(doc, conn);
           return;
         }
-      } catch (e) {
-        debug.error('Invalid auth message format');
+      } else {
+        debug.error('Invalid auth message format - missing type or not an auth message', { 
+          messageType: message?.type,
+          hasMessage: !!message
+        });
         closeConn(doc, conn);
         return;
       }
     }
 
+    // Handle binary messages for sync/awareness
     const encoder = encoding.createEncoder();
     const decoder = decoding.createDecoder(message);
     const messageType = decoding.readVarUint(decoder);
@@ -307,19 +297,17 @@ const closeConn = (doc, conn) => {
 };
 
 const send = (doc, conn, m) => {
-  if (
-    conn.readyState !== wsReadyStateConnecting &&
-    conn.readyState !== wsReadyStateOpen
-  ) {
+  if (conn.readyState !== wsReadyStateConnecting && conn.readyState !== wsReadyStateOpen) {
     closeConn(doc, conn);
-  }
-  try {
-    conn.send(m, (err) => {
-      err != null && closeConn(doc, conn);
-    });
-  } catch (e) {
-    debug.error('Error sending message', e);
-    closeConn(doc, conn);
+  } else {
+    try {
+      conn.send(m, (err) => {
+        err != null && closeConn(doc, conn);
+      });
+    } catch (e) {
+      debug.error('Error sending message', e);
+      closeConn(doc, conn);
+    }
   }
 };
 
@@ -340,7 +328,7 @@ const setupWSConnection = (
 ) => {
   debug.connection('New connection', { docName, ip: req.socket.remoteAddress });
   ws.binaryType = 'arraybuffer';
-  ws.isAuthenticated = !editorPassword; // Auto-authenticate if no password is set
+  ws.isAuthenticated = false;
   
   const doc = map.setIfUndefined(docs, docName, () => {
     debug.document('Creating new document', { name: docName });
@@ -355,17 +343,74 @@ const setupWSConnection = (
   doc.conns.set(ws, new Set());
   debug.document('Connection added to document', { name: docName, totalConns: doc.conns.size });
   
-  ws.on('message', (message) => {
-    // Try to parse as JSON first for auth messages
+  ws.on('message', (message, isBinary) => {
+    debug.message('Received message', {
+      type: isBinary ? 'binary': 'string',
+      content: isBinary
+        ? Array.from(new Uint8Array(message)).map(byte => byte.toString(16)).join(' ')
+        : message.toString()
+    });
+    // Handle authentication first
     if (!ws.isAuthenticated) {
-      messageListener(ws, doc, message);
-    } else if (message instanceof Buffer || message instanceof ArrayBuffer) {
-      messageListener(ws, doc, new Uint8Array(message));
+      try {
+        const authMessage = JSON.parse(message.toString());
+        if (!authMessage || authMessage.type !== 'auth') {
+          debug.error('Invalid auth message - missing type or not an auth message');
+          closeConn(doc, ws);
+          return;
+        }
+        
+        if (authMessage.password === editorPassword) {
+          ws.isAuthenticated = true;
+          debug.connection('Client authenticated successfully');
+          ws.send(JSON.stringify({ type: 'auth', status: 'success' }));
+          
+          // Send initial sync messages only after successful authentication
+          const encoder = encoding.createEncoder();
+          encoding.writeVarUint(encoder, messageSync);
+          syncProtocol.writeSyncStep1(encoder, doc);
+          const syncStep1Message = encoding.toUint8Array(encoder);
+          debug.message('Sending initial sync step 1', {
+            messageLength: syncStep1Message.length,
+            messageContent: Array.from(syncStep1Message).map(byte => byte.toString(16)).join(' ')
+          });
+          send(doc, ws, syncStep1Message);
+          
+          const awarenessStates = doc.awareness.getStates();
+          if (awarenessStates.size > 0) {
+            const encoder = encoding.createEncoder();
+            encoding.writeVarUint(encoder, messageAwareness);
+            encoding.writeVarUint8Array(
+              encoder,
+              awarenessProtocol.encodeAwarenessUpdate(doc.awareness, Array.from(awarenessStates.keys()))
+            );
+            send(doc, ws, encoding.toUint8Array(encoder));
+          }
+        } else {
+          debug.error('Authentication failed - invalid password');
+          ws.send(JSON.stringify({ type: 'auth', status: 'error', message: 'Invalid password' }));
+          closeConn(doc, ws);
+        }
+      } catch (e) {
+        debug.error('Invalid auth message format', {
+          error: e.message,
+          message: message.toString()
+        });
+        closeConn(doc, ws);
+      }
+      return;
     } else {
-      debug.error('Invalid message format');
-      closeConn(doc, ws);
+      // Handle binary messages only after authentication
+      if (isBinary) {
+        messageListener(ws, doc, new Uint8Array(message));
+      } else {
+        debug.error('Expected binary message after authentication');
+        closeConn(doc, ws);
+      }
     }
+    
   });
+  
   ws.on('close', () => {
     debug.connection('Connection closed', { docName });
     closeConn(doc, ws);
@@ -394,28 +439,6 @@ const setupWSConnection = (
   ws.on('pong', () => {
     pongReceived = true;
   });
-
-  // send sync step 1
-  const encoder = encoding.createEncoder();
-  encoding.writeVarUint(encoder, messageSync);
-  syncProtocol.writeSyncStep1(encoder, doc);
-  const syncStep1Message = encoding.toUint8Array(encoder);
-  debug.message('Sending initial sync step 1', {
-    messageLength: syncStep1Message.length,
-    messageContent: Array.from(syncStep1Message).map(byte => byte.toString(16)).join(' ')
-  });
-  send(doc, ws, syncStep1Message);
-  
-  const awarenessStates = doc.awareness.getStates();
-  if (awarenessStates.size > 0) {
-    const encoder = encoding.createEncoder();
-    encoding.writeVarUint(encoder, messageAwareness);
-    encoding.writeVarUint8Array(
-      encoder,
-      awarenessProtocol.encodeAwarenessUpdate(doc.awareness, Array.from(awarenessStates.keys()))
-    );
-    send(doc, ws, encoding.toUint8Array(encoder));
-  }
 };
 
 // Create and start the server

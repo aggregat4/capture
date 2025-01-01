@@ -21,6 +21,9 @@ const loadConfig = () => {
 };
 
 const saveConfig = (config) => {
+  if (!config.password) {
+    throw new Error('Password is required');
+  }
   localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
 };
 
@@ -28,6 +31,18 @@ const saveConfig = (config) => {
 const wsProvider = (doc) => {
   console.log('Creating new WebSocket connection...');
   const config = loadConfig();
+  const connectionStatus = {
+    isConnected: false,
+    isAuthenticated: false
+  };
+
+  if (!config.password) {
+    const statusBar = document.querySelector('footer');
+    statusBar.textContent = 'Error: Password is required';
+    statusBar.className = 'error';
+    throw new Error('Password is required');
+  }
+  
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = `${protocol}//${window.location.host}/ws/${config.documentName}`;
   const ws = new WebSocket(wsUrl);
@@ -36,6 +51,7 @@ const wsProvider = (doc) => {
   ws.binaryType = 'arraybuffer';
   
   const sendMessage = (message) => {
+    console.log("Sending message", message);
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(message);
     }
@@ -43,83 +59,85 @@ const wsProvider = (doc) => {
   
   ws.onopen = () => {
     console.log('WebSocket connection opened successfully');
-    if (config.password) {
-      const authMessage = {
-        type: 'auth',
-        password: config.password
-      };
-      ws.send(JSON.stringify(authMessage));
-    } else {
-      authenticationComplete = true;
-      // Send sync step 1 when connection opens
-      const encoder = encoding.createEncoder();
-      encoding.writeVarUint(encoder, messageSync);
-      syncProtocol.writeSyncStep1(encoder, doc);
-      sendMessage(encoding.toUint8Array(encoder));
-    }
+    const statusBar = document.querySelector('footer');
+    statusBar.textContent = 'Authenticating...';
+    console.log("Sending auth message");
+    const authMessage = {
+      type: 'auth',
+      password: config.password
+    };
+    // ws.send(JSON.stringify(authMessage));
+    sendMessage(JSON.stringify(authMessage));
   };
   
   ws.onmessage = (event) => {
     console.log('Received WebSocket message');
     
     // Handle authentication response
-    if (!authenticationComplete && typeof event.data === 'string') {
-      try {
-        const response = JSON.parse(event.data);
-        if (response.type === 'auth') {
-          if (response.status === 'success') {
-            console.log('Authentication successful');
-            authenticationComplete = true;
-            // Send sync step 1 after successful authentication
-            const encoder = encoding.createEncoder();
-            encoding.writeVarUint(encoder, messageSync);
-            syncProtocol.writeSyncStep1(encoder, doc);
-            sendMessage(encoding.toUint8Array(encoder));
-          } else {
-            console.error('Authentication failed:', response.message);
-            const statusBar = document.querySelector('footer');
-            statusBar.textContent = 'Authentication failed - Invalid password';
-            statusBar.className = 'error';
-            ws.close();
-          }
-          return;
-        }
-      } catch (e) {
-        console.error('Error parsing auth response:', e);
-      }
-    }
-    
-    // Only process binary messages if authenticated
     if (!authenticationComplete) {
-      console.error('Received message before authentication');
-      return;
+      if (typeof event.data === 'string') {
+        try {
+          const response = JSON.parse(event.data);
+          if (response.type === 'auth') {
+            if (response.status === 'success') {
+              console.log('Authentication successful');
+              authenticationComplete = true;
+              connectionStatus.isAuthenticated = true;
+              // Enable editor
+              const editor = document.getElementById('editor');
+              editor.contentEditable = 'true';
+              const statusBar = document.querySelector('footer');
+              statusBar.textContent = 'Connected - Editor enabled';
+              statusBar.className = 'connected';
+              
+              // Send sync step 1 after successful authentication
+              const encoder = encoding.createEncoder();
+              encoding.writeVarUint(encoder, messageSync);
+              syncProtocol.writeSyncStep1(encoder, doc);
+              sendMessage(encoding.toUint8Array(encoder));
+            } else {
+              console.error('Authentication failed:', response.message);
+              const statusBar = document.querySelector('footer');
+              statusBar.textContent = 'Authentication failed - Invalid password';
+              statusBar.className = 'error';
+              ws.close();
+            }
+          }
+        } catch (e) {
+          console.error('Error parsing auth response:', e);
+        }
+      }
+      return; // Don't process any messages until authentication is complete
     }
     
-    const message = new Uint8Array(event.data);
-    const encoder = encoding.createEncoder();
-    const decoder = decoding.createDecoder(message);
-    const messageType = decoding.readVarUint(decoder);
-    console.log('Message type:', messageType === messageSync ? 'sync' : 'awareness');
-    
-    switch (messageType) {
-      case messageSync: {
-        console.log('Processing sync message');
-        encoding.writeVarUint(encoder, messageSync);
-        syncProtocol.readSyncMessage(decoder, encoder, doc, sendMessage);
-        console.log('Current document content:', doc.getText('editor').toString());
-        if (encoding.length(encoder) > 1) {
-          const response = encoding.toUint8Array(encoder);
-          console.log('Sending sync response', {
-            responseLength: response.length,
-            responseContent: Array.from(response).map(byte => byte.toString(16)).join(' ')
-          });
-          sendMessage(response);
+    // Handle binary messages
+    if (event.data instanceof ArrayBuffer) {
+      const message = new Uint8Array(event.data);
+      const encoder = encoding.createEncoder();
+      const decoder = decoding.createDecoder(message);
+      const messageType = decoding.readVarUint(decoder);
+      console.log('Message type:', messageType === messageSync ? 'sync' : 'awareness');
+      
+      switch (messageType) {
+        case messageSync: {
+          console.log('Processing sync message');
+          encoding.writeVarUint(encoder, messageSync);
+          syncProtocol.readSyncMessage(decoder, encoder, doc, sendMessage);
+          console.log('Current document content:', doc.getText('editor').toString());
+          if (encoding.length(encoder) > 1) {
+            const response = encoding.toUint8Array(encoder);
+            console.log('Sending sync response', {
+              responseLength: response.length,
+              responseContent: Array.from(response).map(byte => byte.toString(16)).join(' ')
+            });
+            sendMessage(response);
+          }
+          break;
         }
-        break;
+        case messageAwareness:
+          awarenessProtocol.applyAwarenessUpdate(doc.awareness, decoding.readVarUint8Array(decoder), null);
+          break;
       }
-      case messageAwareness:
-        awarenessProtocol.applyAwarenessUpdate(doc.awareness, decoding.readVarUint8Array(decoder), null);
-        break;
     }
   };
 
@@ -137,22 +155,32 @@ const wsProvider = (doc) => {
 
   return {
     ws,
+    connectionStatus,
     destroy: () => {
       console.log('Destroying WebSocket connection');
       ws.close();
     },
     on: (event, callback) => {
       if (event === 'status') {
+        // Store the original onopen handler
+        const originalOnOpen = ws.onopen;
         ws.onopen = () => {
           console.log('Status: Connected');
           callback({ status: 'connected' });
+          // Call the original onopen handler
+          if (originalOnOpen) originalOnOpen();
         };
+
+        // Store the original onclose handler
+        const originalOnClose = ws.onclose;
         ws.onclose = (event) => {
           console.log('Status: Disconnected', {
             code: event.code,
             reason: event.reason
           });
           callback({ status: 'disconnected' });
+          // Call the original onclose handler
+          if (originalOnClose) originalOnClose(event);
         };
       }
     }
@@ -198,9 +226,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Set up WebSocket provider
   const provider = wsProvider(doc);
+
+  // Disable editor until authenticated and connected
+  editor.contentEditable = 'false';
+  statusBar.textContent = 'Connecting...';
   
   // Handle document updates
   doc.on('update', (update, origin) => {
+    if (!provider.connectionStatus.isConnected || !provider.connectionStatus.isAuthenticated) return;
+
     console.log('Document update:', {
       updateLength: update.length,
       updateContent: Array.from(update).map(byte => byte.toString(16)).join(' '),
@@ -220,19 +254,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
   provider.on('status', ({ status }) => {
     console.log('Connection status:', status);
-    isConnected = status === 'connected';
-    editor.contentEditable = String(isConnected);
+    provider.connectionStatus.isConnected = status === 'connected';
     
-    statusBar.textContent = isConnected ? 
-      'Connected - Editor enabled' : 
-      'Disconnected - Editor disabled';
-    statusBar.className = isConnected ? 'connected' : '';
+    if (!provider.connectionStatus.isConnected) {
+      editor.contentEditable = 'false';
+      statusBar.textContent = 'Disconnected - Editor disabled';
+      statusBar.className = '';
+    }
   });
 
   // Observe changes to the shared text
   text.observe(event => {
     if (isUpdating) return;
-    if (!isConnected) return;
+    if (!provider.connectionStatus.isConnected || !provider.connectionStatus.isAuthenticated) return;
     
     try {
       const newContent = event.target.toString();
@@ -269,7 +303,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Handle content editable changes
   editor.addEventListener('input', () => {
-    if (!isConnected) return;
+    if (!provider.connectionStatus.isConnected || !provider.connectionStatus.isAuthenticated) return;
     
     try {
       const content = editor.textContent;
