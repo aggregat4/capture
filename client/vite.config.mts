@@ -12,10 +12,18 @@ export default defineConfig({
   },
   build: {
     outDir: '../dist',
-    emptyOutDir: true
+    emptyOutDir: true,
+    rollupOptions: {
+      external: ['y-indexeddb'],
+      output: {
+        globals: {
+          'y-indexeddb': 'Y_IndexedDB'
+        }
+      }
+    }
   },
   optimizeDeps: {
-    include: ['yjs', 'lib0']
+    include: ['yjs', 'lib0', 'y-indexeddb']
   },
   resolve: {
     dedupe: ['yjs']
