@@ -88,7 +88,7 @@ const wsProvider = (doc) => {
               const editor = document.getElementById('editor');
               editor.contentEditable = 'true';
               const statusBar = document.querySelector('footer');
-              statusBar.textContent = 'Connected - Editor enabled';
+              statusBar.textContent = 'Connected';
               statusBar.className = 'connected';
               
               // Send sync step 1 after successful authentication
@@ -233,7 +233,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Enable editing when offline data is loaded
     editor.contentEditable = 'true';
     if (!websocketProvider.connectionStatus.isConnected) {
-      statusBar.textContent = 'Offline - Changes will sync when online';
+      statusBar.textContent = 'Offline';
       statusBar.className = 'warning';
     }
   });
@@ -281,7 +281,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!websocketProvider.connectionStatus.isConnected) {
       // When disconnected, we still allow editing if we have local data
       editor.contentEditable = 'true';
-      statusBar.textContent = 'Offline - Changes will sync when online';
+      statusBar.textContent = 'Offline';
       statusBar.className = 'warning';
     } else {
       statusBar.textContent = 'Connected';
