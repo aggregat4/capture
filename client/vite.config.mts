@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import { resolve } from 'path'
+import { serviceWorkerPlugin } from './vite-sw-plugin'
 
 export default defineConfig({
   server: {
@@ -19,5 +20,8 @@ export default defineConfig({
   },
   resolve: {
     dedupe: ['yjs']
-  }
+  },
+  plugins: [
+    serviceWorkerPlugin()
+  ]
 }) 

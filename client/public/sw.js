@@ -1,5 +1,6 @@
 // Cache version should be updated when content changes
-const CACHE_VERSION = '2023-09-01-v1';
+// This line will be replaced during build with git hash and timestamp
+const CACHE_VERSION = 'dev';
 const CACHE_NAME = `capture-${CACHE_VERSION}`;
 const ASSETS_TO_CACHE = [
   '/',
