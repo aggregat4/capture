@@ -59,15 +59,21 @@ document.addEventListener('DOMContentLoaded', () => {
     e.preventDefault()
     const format = button.dataset.format
     
+    const selection = window.getSelection()
+    if (!selection || !selection.rangeCount) return
+    
+    const range = selection.getRangeAt(0)
+    if (!editor.contains(range.commonAncestorContainer)) return
+    
     switch (format) {
       case 'bold':
-        document.execCommand('bold', false)
+        applyInlineFormat('strong', range)
         break
       case 'italic':
-        document.execCommand('italic', false)
+        applyInlineFormat('em', range)
         break
       case 'list':
-        document.execCommand('insertUnorderedList', false)
+        applyListFormat(range)
         break
     }
     
@@ -78,20 +84,143 @@ document.addEventListener('DOMContentLoaded', () => {
     editor.dispatchEvent(new Event('input'))
   })
   
+  // Apply inline formatting (bold/italic)
+  const applyInlineFormat = (tag: string, range: Range) => {
+    const isFormatted = isInlineFormatted(tag, range)
+    
+    if (isFormatted) {
+      // Remove formatting
+      const elements = getElementsInRange(tag, range)
+      elements.forEach(element => {
+        const parent = element.parentNode
+        if (parent) {
+          while (element.firstChild) {
+            parent.insertBefore(element.firstChild, element)
+          }
+          parent.removeChild(element)
+        }
+      })
+    } else {
+      // Apply formatting
+      const element = document.createElement(tag)
+      range.surroundContents(element)
+    }
+  }
+  
+  // Apply list formatting
+  const applyListFormat = (range: Range) => {
+    const listElement = getParentOfType('ul', range.commonAncestorContainer)
+    
+    if (listElement) {
+      // Remove list formatting
+      const items = Array.from(listElement.children)
+      items.forEach(item => {
+        if (item.tagName.toLowerCase() === 'li') {
+          const p = document.createElement('p')
+          p.innerHTML = item.innerHTML
+          listElement.parentNode?.insertBefore(p, listElement)
+        }
+      })
+      listElement.parentNode?.removeChild(listElement)
+    } else {
+      // Apply list formatting
+      const ul = document.createElement('ul')
+      const li = document.createElement('li')
+      
+      // If the selection is within a paragraph, convert it to a list item
+      const paragraph = getParentOfType('p', range.commonAncestorContainer)
+      if (paragraph) {
+        li.innerHTML = paragraph.innerHTML
+        ul.appendChild(li)
+        paragraph.parentNode?.replaceChild(ul, paragraph)
+      } else {
+        // Otherwise, wrap the selection in a list item
+        li.appendChild(range.extractContents())
+        ul.appendChild(li)
+        range.insertNode(ul)
+      }
+    }
+  }
+  
+  // Helper function to get all elements of a type within a range
+  const getElementsInRange = (tag: string, range: Range): Element[] => {
+    const elements: Element[] = []
+    const walker = document.createTreeWalker(
+      range.commonAncestorContainer,
+      NodeFilter.SHOW_ELEMENT,
+      {
+        acceptNode: (node) => {
+          if (node.nodeName.toLowerCase() === tag && range.intersectsNode(node)) {
+            return NodeFilter.FILTER_ACCEPT
+          }
+          return NodeFilter.FILTER_SKIP
+        }
+      }
+    )
+    
+    let node: Node | null
+    while (node = walker.nextNode()) {
+      elements.push(node as Element)
+    }
+    return elements
+  }
+  
+  // Helper function to check if a range has inline formatting
+  const isInlineFormatted = (tag: string, range: Range): boolean => {
+    // If it's a collapsed cursor, check if we're inside the formatting
+    if (range.collapsed) {
+      let node: Node | null = range.startContainer
+      
+      // If we're in a text node, start with its parent
+      if (node.nodeType === Node.TEXT_NODE) {
+        node = node.parentNode
+      }
+      
+      // Check if we're inside the formatting tag
+      while (node && node !== editor) {
+        if (node.nodeName.toLowerCase() === tag) {
+          return true
+        }
+        node = node.parentNode
+      }
+      return false
+    }
+    
+    // For selections, check if any part is formatted
+    return getElementsInRange(tag, range).length > 0
+  }
+  
+  // Helper function to get nearest parent of specific type
+  const getParentOfType = (tag: string, node: Node | null): Element | null => {
+    while (node && node !== editor) {
+      if (node.nodeName.toLowerCase() === tag) {
+        return node as Element
+      }
+      node = node.parentNode
+    }
+    return null
+  }
+  
   // Update toolbar state based on current selection
   const updateToolbarState = () => {
+    const selection = window.getSelection()
+    if (!selection || !selection.rangeCount) return
+    
+    const range = selection.getRangeAt(0)
+    if (!editor.contains(range.commonAncestorContainer)) return
+    
     const buttons = toolbar.querySelectorAll('button')
     buttons.forEach(button => {
       const format = button.dataset.format
       switch (format) {
         case 'bold':
-          button.classList.toggle('active', document.queryCommandState('bold'))
+          button.classList.toggle('active', isInlineFormatted('strong', range))
           break
         case 'italic':
-          button.classList.toggle('active', document.queryCommandState('italic'))
+          button.classList.toggle('active', isInlineFormatted('em', range))
           break
         case 'list':
-          button.classList.toggle('active', document.queryCommandState('insertUnorderedList'))
+          button.classList.toggle('active', !!getParentOfType('ul', range.commonAncestorContainer))
           break
       }
     })
