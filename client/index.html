@@ -7,8 +7,10 @@
     <link rel="icon" href="data:,">
     <style>
         :root {
-            --color-background: #f5f5f5;
-            --color-white: #fff;
+            --config-background-color: #f5f5f5;
+            --color-background-editor: #fff;
+            --color-header-text: #fff;
+            --color-text-inverted: #fff;
             --color-border: #ddd;
             --color-primary: #007bff;
             --color-primary-dark: #0056b3;
@@ -25,7 +27,6 @@
             margin: 0;
             padding: 0;
             font-family: sans-serif;
-            background: var(--color-background);
             box-sizing: border-box;
             height: 100%;
             min-height: 100%;
@@ -35,7 +36,7 @@
             position: fixed;
             width: 100%;
             overflow: hidden;
-            background: var(--color-white);
+            background-color: var(--color-background-editor);
         }
 
         .header {
@@ -43,19 +44,17 @@
             position: relative;
             z-index: 2;
             box-shadow: 0 2px 4px var(--color-shadow);
-            text-align: center;
             display: flex;
             align-items: center;
             justify-content: center;
             background-color: var(--color-header);
-            color: var(--color-white);
+            color: var(--color-header-text);
 
             & h1 {
                 margin: 0;
                 font-size: 1.5rem;
                 max-width: 66ch;
                 padding: 0 20px;
-                color: var(--color-white);
             }
         }
 
@@ -64,8 +63,8 @@
             right: 1rem;
             padding: 0.5rem;
             background: transparent;
-            border: 1px solid var(--color-white);
-            color: var(--color-white);
+            border: 1px solid var(--color-header-text);
+            color: var(--color-header-text);
             border-radius: 4px;
             cursor: pointer;
             font-size: 14px;
@@ -75,7 +74,6 @@
 
             &:hover {
                 background-color: var(--color-hover-overlay);
-                color: var(--color-white);
             }
 
             & svg {
@@ -91,7 +89,7 @@
 
         .config-section {
             padding: 0;
-            background: var(--color-background);
+            background: var(--config-background-color);
             border-bottom: 1px solid var(--color-border);
             margin-bottom: 0;
             transition: all 0.3s ease;
@@ -125,7 +123,7 @@
             & button {
                 padding: 0.5rem 1rem;
                 background: var(--color-primary);
-                color: var(--color-white);
+                color: var(--color-text-inverted);
                 border: none;
                 border-radius: 4px;
                 cursor: pointer;
@@ -144,7 +142,7 @@
             padding: 10px;
             width: calc(70ch - 40px);
             max-width: calc(100% - 40px);
-            background: var(--color-white);
+            background: var(--color-background-editor);
             border: none;
             outline: none;
             font-size: 1rem;
@@ -155,7 +153,7 @@
             z-index: 1;
 
             &[contenteditable="false"] {
-                background: var(--color-background);
+                background: var(--config-background-color);
                 color: var(--color-text);
                 cursor: not-allowed;
             }
@@ -172,24 +170,22 @@
             color: var(--color-text-muted);
 
             &.connected {
-                color: var(--color-white);
+                color: var(--color-text-inverted);
                 font-weight: 500;
             }
 
             &.error {
-                color: var(--color-white);
+                color: var(--color-text-inverted);
                 font-weight: bold;
                 background-color: var(--color-error);
             }
         }
 
         @media (max-width: 600px) {
-            .header {
-                & h1 {
-                    max-width: 100%;
-                    padding: 0 10px;
-                    font-size: 1.2rem;
-                }
+            .header h1 {
+                max-width: 100%;
+                padding: 0 10px;
+                font-size: 1.2rem;
             }
 
             .config-toggle {
@@ -197,11 +193,9 @@
                 padding: 0.4rem;
             }
 
-            .config-section {
-                &.visible {
-                    padding: 1rem 1rem 1.5rem 1rem;
-                    max-height: 150px;
-                }
+            .config-section.visible {
+                padding: 1rem 1rem 1.5rem 1rem;
+                max-height: 150px;
             }
 
             .config-controls {
