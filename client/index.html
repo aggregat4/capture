@@ -6,11 +6,26 @@
     <title>Collaborative Editor</title>
     <link rel="icon" href="data:,">
     <style>
+        :root {
+            --color-background: #f5f5f5;
+            --color-white: #fff;
+            --color-border: #ddd;
+            --color-primary: #007bff;
+            --color-primary-dark: #0056b3;
+            --color-text: #6c757d;
+            --color-success: #28a745;
+            --color-error: #dc3545;
+            --color-header: #ff9f43;
+            --color-shadow: rgba(0, 0, 0, 0.1);
+            --color-hover-overlay: rgba(255, 255, 255, 0.2);
+            --color-text-muted: rgba(255, 255, 255, 0.9);
+        }
+
         body, html {
             margin: 0;
             padding: 0;
             font-family: sans-serif;
-            background: #f5f5f5;
+            background: var(--color-background);
             box-sizing: border-box;
             height: 100%;
             min-height: 100%;
@@ -20,24 +35,27 @@
             position: fixed;
             width: 100%;
             overflow: hidden;
-            background: white;
+            background: var(--color-white);
         }
 
         .header {
             padding: 6px;
             position: relative;
             z-index: 2;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            box-shadow: 0 2px 4px var(--color-shadow);
             text-align: center;
             display: flex;
             align-items: center;
             justify-content: center;
+            background-color: var(--color-header);
+            color: var(--color-white);
 
             & h1 {
                 margin: 0;
                 font-size: 1.5rem;
                 max-width: 66ch;
                 padding: 0 20px;
+                color: var(--color-white);
             }
         }
 
@@ -46,8 +64,8 @@
             right: 1rem;
             padding: 0.5rem;
             background: transparent;
-            border: 1px solid #007bff;
-            color: #007bff;
+            border: 1px solid var(--color-white);
+            color: var(--color-white);
             border-radius: 4px;
             cursor: pointer;
             font-size: 14px;
@@ -56,8 +74,8 @@
             gap: 0.5rem;
 
             &:hover {
-                background-color: #007bff;
-                color: white;
+                background-color: var(--color-hover-overlay);
+                color: var(--color-white);
             }
 
             & svg {
@@ -73,8 +91,8 @@
 
         .config-section {
             padding: 0;
-            background: #f5f5f5;
-            border-bottom: 1px solid #ddd;
+            background: var(--color-background);
+            border-bottom: 1px solid var(--color-border);
             margin-bottom: 0;
             transition: all 0.3s ease;
             max-height: 0;
@@ -98,7 +116,7 @@
             
             & input {
                 padding: 0.5rem;
-                border: 1px solid #ddd;
+                border: 1px solid var(--color-border);
                 border-radius: 4px;
                 font-size: 14px;
                 flex: 1;
@@ -106,8 +124,8 @@
             
             & button {
                 padding: 0.5rem 1rem;
-                background: #007bff;
-                color: white;
+                background: var(--color-primary);
+                color: var(--color-white);
                 border: none;
                 border-radius: 4px;
                 cursor: pointer;
@@ -115,7 +133,7 @@
                 white-space: nowrap;
 
                 &:hover {
-                    background-color: #0056b3;
+                    background-color: var(--color-primary-dark);
                 }
             }
         }
@@ -126,7 +144,7 @@
             padding: 10px;
             width: calc(70ch - 40px);
             max-width: calc(100% - 40px);
-            background: white;
+            background: var(--color-white);
             border: none;
             outline: none;
             font-size: 1rem;
@@ -137,8 +155,8 @@
             z-index: 1;
 
             &[contenteditable="false"] {
-                background: #f8f9fa;
-                color: #6c757d;
+                background: var(--color-background);
+                color: var(--color-text);
                 cursor: not-allowed;
             }
         }
@@ -146,19 +164,22 @@
         footer {
             padding: 6px;
             text-align: center;
-            color: #666;
             font-size: 14px;
-            border-top: 1px solid #ddd;
-            box-shadow: 0 -2px 4px rgba(0,0,0,0.2);
+            border-top: 1px solid var(--color-border);
+            box-shadow: 0 -2px 4px var(--color-shadow);
             z-index: 2;
+            background-color: var(--color-header);
+            color: var(--color-text-muted);
 
             &.connected {
-                color: #28a745;
+                color: var(--color-white);
+                font-weight: 500;
             }
 
             &.error {
-                color: #dc3545;
+                color: var(--color-white);
                 font-weight: bold;
+                background-color: var(--color-error);
             }
         }
 
