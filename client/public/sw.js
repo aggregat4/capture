@@ -1,4 +1,6 @@
-const CACHE_NAME = 'capture-v1';
+// Cache version should be updated when content changes
+const CACHE_VERSION = '2023-09-01-v1';
+const CACHE_NAME = `capture-${CACHE_VERSION}`;
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
@@ -20,11 +22,71 @@ const ASSETS_TO_CACHE = [
   '/splash/apple-splash-828-1792.png'
 ];
 
+// Check if we're in development mode
+const isDev = self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1';
+
+// Helper to check if a response should be cached
+const shouldCache = (response) => {
+  // Only cache successful responses
+  if (!response || response.status !== 200 || response.type !== 'basic') {
+    return false;
+  }
+
+  // Check cache control headers
+  const cacheControl = response.headers.get('Cache-Control');
+  if (cacheControl) {
+    // Don't cache if explicitly told not to
+    if (cacheControl.includes('no-store') || cacheControl.includes('no-cache')) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
+// Helper to check if a cached response is stale
+const isStale = (cachedResponse) => {
+  if (!cachedResponse) return true;
+
+  // Check if the cached response has expired
+  const cacheControl = cachedResponse.headers.get('Cache-Control');
+  if (cacheControl) {
+    const maxAge = parseInt(cacheControl.match(/max-age=(\d+)/)?.[1]);
+    if (maxAge) {
+      const dateHeader = cachedResponse.headers.get('date');
+      if (dateHeader) {
+        const cacheDate = new Date(dateHeader).getTime();
+        const now = new Date().getTime();
+        return (now - cacheDate) > (maxAge * 1000);
+      }
+    }
+  }
+
+  // If no cache control headers, consider it stale
+  // This will make the service worker always fetch a fresh copy
+  return true;
+};
+
 // Install event - cache assets
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(ASSETS_TO_CACHE))
+      .then((cache) => {
+        // Only cache assets in production
+        if (!isDev) {
+          // Fetch and cache with proper headers
+          return Promise.all(
+            ASSETS_TO_CACHE.map(url => 
+              fetch(url).then(response => {
+                if (shouldCache(response)) {
+                  return cache.put(url, response);
+                }
+              })
+            )
+          );
+        }
+        return Promise.resolve();
+      })
       .then(() => self.skipWaiting())
   );
 });
@@ -36,7 +98,7 @@ self.addEventListener('activate', (event) => {
       .then((cacheNames) => {
         return Promise.all(
           cacheNames
-            .filter((name) => name !== CACHE_NAME)
+            .filter((name) => name.startsWith('capture-') && name !== CACHE_NAME)
             .map((name) => caches.delete(name))
         );
       })
@@ -56,27 +118,44 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // In development mode, always go to network first
+  if (isDev) {
+    event.respondWith(
+      fetch(event.request)
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // In production, use stale-while-revalidate strategy
   event.respondWith(
     caches.match(event.request)
-      .then((response) => {
-        if (response) {
+      .then((cachedResponse) => {
+        const fetchPromise = fetch(event.request).then(response => {
+          // Cache new response if appropriate
+          if (shouldCache(response)) {
+            const responseToCache = response.clone();
+            caches.open(CACHE_NAME)
+              .then((cache) => {
+                cache.put(event.request, responseToCache);
+              });
+          }
           return response;
+        }).catch(() => {
+          // If network fails and we have a cached response, use it
+          if (cachedResponse) {
+            return cachedResponse;
+          }
+          throw new Error('No cached response available');
+        });
+
+        // If we have a cached response that isn't stale, use it
+        if (cachedResponse && !isStale(cachedResponse)) {
+          return cachedResponse;
         }
 
-        return fetch(event.request).then((response) => {
-          // Don't cache non-successful responses
-          if (!response || response.status !== 200 || response.type !== 'basic') {
-            return response;
-          }
-
-          const responseToCache = response.clone();
-          caches.open(CACHE_NAME)
-            .then((cache) => {
-              cache.put(event.request, responseToCache);
-            });
-
-          return response;
-        });
+        // Otherwise wait for the network response
+        return fetchPromise;
       })
   );
 }); 
