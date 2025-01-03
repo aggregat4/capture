@@ -32,13 +32,13 @@
             display: flex;
             align-items: center;
             justify-content: center;
-        }
 
-        .header h1 {
-            margin: 0;
-            font-size: 1.5rem;
-            max-width: 66ch;
-            padding: 0 20px;
+            & h1 {
+                margin: 0;
+                font-size: 1.5rem;
+                max-width: 66ch;
+                padding: 0 20px;
+            }
         }
 
         .config-toggle {
@@ -54,21 +54,21 @@
             display: flex;
             align-items: center;
             gap: 0.5rem;
-        }
 
-        .config-toggle:hover {
-            background: #007bff;
-            color: white;
-        }
+            &:hover {
+                background-color: #007bff;
+                color: white;
+            }
 
-        .config-toggle svg {
-            width: 16px;
-            height: 16px;
-            transition: transform 0.2s ease;
-        }
+            & svg {
+                width: 16px;
+                height: 16px;
+                transition: transform 0.2s ease;
+            }
 
-        .config-toggle.active svg {
-            transform: rotate(180deg);
+            &.active svg {
+                transform: rotate(180deg);
+            }
         }
 
         .config-section {
@@ -80,12 +80,12 @@
             max-height: 0;
             opacity: 0;
             overflow: hidden;
-        }
-        
-        .config-section.visible {
-            padding: 1rem;
-            max-height: 100px;
-            opacity: 1;
+            
+            &.visible {
+                padding: 1rem;
+                max-height: 100px;
+                opacity: 1;
+            }
         }
         
         .config-controls {
@@ -95,29 +95,29 @@
             max-width: calc(70ch - 40px);
             margin: 0 auto;
             width: 100%;
-        }
-        
-        .config-controls input {
-            padding: 0.5rem;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 14px;
-            flex: 1;
-        }
-        
-        .config-controls button {
-            padding: 0.5rem 1rem;
-            background: #007bff;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            white-space: nowrap;
-        }
-        
-        .config-controls button:hover {
-            background: #0056b3;
+            
+            & input {
+                padding: 0.5rem;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                font-size: 14px;
+                flex: 1;
+            }
+            
+            & button {
+                padding: 0.5rem 1rem;
+                background: #007bff;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 14px;
+                white-space: nowrap;
+
+                &:hover {
+                    background-color: #0056b3;
+                }
+            }
         }
 
         #editor {
@@ -135,12 +135,12 @@
             -webkit-overflow-scrolling: touch;
             position: relative;
             z-index: 1;
-        }
 
-        #editor[contenteditable="false"] {
-            background: #f8f9fa;
-            color: #6c757d;
-            cursor: not-allowed;
+            &[contenteditable="false"] {
+                background: #f8f9fa;
+                color: #6c757d;
+                cursor: not-allowed;
+            }
         }
 
         footer {
@@ -151,22 +151,24 @@
             border-top: 1px solid #ddd;
             box-shadow: 0 -2px 4px rgba(0,0,0,0.2);
             z-index: 2;
-        }
 
-        footer.connected {
-            color: #28a745;
-        }
+            &.connected {
+                color: #28a745;
+            }
 
-        footer.error {
-            color: #dc3545;
-            font-weight: bold;
+            &.error {
+                color: #dc3545;
+                font-weight: bold;
+            }
         }
 
         @media (max-width: 600px) {
-            .header h1 {
-                max-width: 100%;
-                padding: 0 10px;
-                font-size: 1.2rem;
+            .header {
+                & h1 {
+                    max-width: 100%;
+                    padding: 0 10px;
+                    font-size: 1.2rem;
+                }
             }
 
             .config-toggle {
@@ -174,21 +176,23 @@
                 padding: 0.4rem;
             }
 
-            .config-section.visible {
-                padding: 1rem 1rem 1.5rem 1rem;
-                max-height: 150px;
+            .config-section {
+                &.visible {
+                    padding: 1rem 1rem 1.5rem 1rem;
+                    max-height: 150px;
+                }
             }
 
             .config-controls {
                 flex-direction: column;
                 padding: 0 10px;
                 gap: 0.75rem;
-            }
 
-            .config-controls input,
-            .config-controls button {
-                width: 100%;
-                margin: 0;
+                & input,
+                & button {
+                    width: 100%;
+                    margin: 0;
+                }
             }
 
             #editor {
