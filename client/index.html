@@ -75,7 +75,7 @@
         }
 
         .header {
-            padding: 6px;
+            padding: calc(6px + env(safe-area-inset-top)) 6px 6px;
             position: relative;
             z-index: 2;
             box-shadow: 0 2px 2px var(--color-shadow);
@@ -95,7 +95,7 @@
 
         .config-toggle {
             position: absolute;
-            right: 1rem;
+            right: max(1rem, env(safe-area-inset-right));
             padding: 0.5rem;
             background: transparent;
             border: 1px solid var(--color-header-text);
