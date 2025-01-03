@@ -733,14 +733,33 @@ document.addEventListener('DOMContentLoaded', () => {
   // Handle content editable changes
   editor.addEventListener('input', () => {
     try {
-      const dirtyContent = editor.innerHTML;
-      // Sanitize and structure the HTML content
-      const cleanContent = wrapInParagraphs(dirtyContent);
-      // Convert to plain text while preserving structure
-      const plainText = htmlToPlainText(cleanContent);
+      const selection = window.getSelection();
+      const range = selection.getRangeAt(0);
       
-      const currentContent = getXmlFragmentContent(text);
-      if (plainText !== currentContent) {
+      // Check if this is a multi-element change
+      const isMultiElementChange = () => {
+        const startElement = range.startContainer.nodeType === Node.TEXT_NODE 
+          ? range.startContainer.parentElement 
+          : range.startContainer;
+        const endElement = range.endContainer.nodeType === Node.TEXT_NODE 
+          ? range.endContainer.parentElement 
+          : range.endContainer;
+        
+        // If start and end are different elements, or if we've deleted content
+        // that spans multiple elements, do a full sync
+        if (startElement !== endElement || editor.childNodes.length !== text.length) {
+          console.log('Multi-element change detected');
+          return true;
+        }
+        return false;
+      };
+
+      // If this is a multi-element change, do a full sync
+      if (isMultiElementChange()) {
+        console.log('Handling multi-element change with full sync');
+        const dirtyContent = editor.innerHTML;
+        const cleanContent = wrapInParagraphs(dirtyContent);
+        
         isUpdating = true;
         doc.transact(() => {
           // Clear existing content
@@ -778,9 +797,239 @@ document.addEventListener('DOMContentLoaded', () => {
           Array.from(div.childNodes).forEach(node => addNode(text, node, documentState));
         });
         isUpdating = false;
+        return;
       }
+
+      // Rest of the existing single-element change handling code...
+      const startContainer = range.startContainer;
+      
+      // Find the nearest parent element that we track in Y.js (p, ul, li)
+      const findNearestTrackedElement = (node) => {
+        while (node && node !== editor) {
+          const tagName = node.tagName?.toLowerCase();
+          // For list items, we want to track the ul parent instead
+          if (tagName === 'li') {
+            const ul = node.closest('ul');
+            if (ul) return ul;
+          }
+          if (['p', 'ul'].includes(tagName)) {
+            return node;
+          }
+          node = node.parentElement;
+        }
+        return null;
+      };
+
+      // Get the nearest tracked element
+      const trackedElement = findNearestTrackedElement(
+        startContainer.nodeType === Node.TEXT_NODE ? startContainer.parentElement : startContainer
+      );
+      
+      console.log('Found tracked element:', trackedElement?.tagName, trackedElement);
+      
+      if (trackedElement) {
+        // Find the Y.js node that corresponds to the changed DOM node
+        const findYjsNode = (domNode, yjsParent) => {
+          if (!yjsParent || !domNode) return null;
+          
+          // Get the full path to this node from the editor root
+          const getNodePath = (node) => {
+            const path = [];
+            let current = node;
+            while (current && current !== editor) {
+              const parent = current.parentElement;
+              if (!parent) break;
+              
+              // Count same-type siblings before this node
+              let index = 0;
+              let sibling = current.previousElementSibling;
+              while (sibling) {
+                if (sibling.tagName === current.tagName) {
+                  index++;
+                }
+                sibling = sibling.previousElementSibling;
+              }
+              
+              path.unshift({
+                tag: current.tagName.toLowerCase(),
+                index,
+                content: current.textContent // Include content as part of matching
+              });
+              current = parent;
+            }
+            return path;
+          };
+          
+          // Get path for the DOM node we're looking for
+          const targetPath = getNodePath(domNode);
+          console.log('Target path:', targetPath);
+          
+          // Helper to check if a Y.js node matches our target at a specific path level
+          const nodeMatchesPathLevel = (node, pathLevel) => {
+            if (!(node instanceof Y.XmlElement)) return false;
+            if (node.nodeName !== pathLevel.tag) return false;
+            
+            // For leaf nodes, also check content similarity
+            if (node.length === 0 || !node.get(0)) {
+              return true; // Empty nodes match
+            }
+            
+            // Get text content of Y.js node
+            let nodeContent = '';
+            let hasElementChildren = false;
+            node.forEach(child => {
+              if (typeof child === 'string') {
+                nodeContent += child;
+              } else if (child instanceof Y.XmlText) {
+                nodeContent += child.toString();
+              } else if (child instanceof Y.XmlElement) {
+                hasElementChildren = true;
+              }
+            });
+            
+            // Compare content similarity if this is a leaf node (no element children)
+            if (!hasElementChildren) {
+              // Use string similarity for fuzzy matching
+              const similar = (a, b) => {
+                const normalize = str => str.trim().toLowerCase().replace(/\s+/g, ' ');
+                return normalize(a) === normalize(b);
+              };
+              return similar(nodeContent, pathLevel.content);
+            }
+            
+            return true;
+          };
+          
+          // Recursively find matching node
+          const findMatchingNode = (parent, pathIndex = 0) => {
+            if (pathIndex >= targetPath.length) return null;
+            
+            const currentPathLevel = targetPath[pathIndex];
+            let matchCount = 0;
+            let result = null;
+            
+            parent.forEach(node => {
+              if (result) return; // Stop if we found a match
+              
+              if (nodeMatchesPathLevel(node, currentPathLevel)) {
+                if (matchCount === currentPathLevel.index) {
+                  if (pathIndex === targetPath.length - 1) {
+                    // Found the final node
+                    result = node;
+                  } else if (node instanceof Y.XmlElement) {
+                    // Recurse into this node
+                    result = findMatchingNode(node, pathIndex + 1);
+                  }
+                }
+                matchCount++;
+              }
+            });
+            
+            return result;
+          };
+          
+          const result = findMatchingNode(yjsParent);
+          console.log('Found matching node:', result?.nodeName, result);
+          return result;
+        };
+
+        const yjsNode = findYjsNode(trackedElement, text);
+        console.log('Found Y.js node:', yjsNode?.nodeName, yjsNode);
+        
+        if (yjsNode) {
+          isUpdating = true;
+          doc.transact(() => {
+            // Update the content of the Y.js node to match the DOM
+            const newContent = DOMPurify.sanitize(trackedElement.innerHTML, purifyConfig);
+            console.log('Updating node content:', newContent);
+            
+            // Clear existing content of this node
+            if (yjsNode.length > 0) {
+              yjsNode.delete(0, yjsNode.length);
+            }
+            
+            // For lists, we need to create proper li elements
+            if (trackedElement.tagName.toLowerCase() === 'ul') {
+              Array.from(trackedElement.children).forEach((li, index) => {
+                if (li.tagName.toLowerCase() === 'li') {
+                  const liElement = new Y.XmlElement('li');
+                  liElement.insert(0, [li.innerHTML]);
+                  yjsNode.insert(index, [liElement]);
+                }
+              });
+            } else {
+              // For other elements, just insert the content
+              if (newContent.trim()) {
+                yjsNode.insert(0, [newContent]);
+              }
+            }
+          });
+          isUpdating = false;
+          return;
+        }
+      }
+      
+      console.log('Falling back to full sync');
+      // If we couldn't find a matching node or if the change was at the root level,
+      // fall back to full sync
+      const dirtyContent = editor.innerHTML;
+      const cleanContent = wrapInParagraphs(dirtyContent);
+      
+      isUpdating = true;
+      doc.transact(() => {
+        // Clear existing content
+        text.delete(0, text.length);
+        
+        // Parse the HTML and create XML elements
+        const div = document.createElement('div');
+        div.innerHTML = cleanContent;
+        
+        const addNode = (parent, node, state = { index: 0 }) => {
+          if (node.nodeType === Node.TEXT_NODE) {
+            if (node.textContent.trim()) {
+              parent.insert(state.index, [node.textContent]);
+              state.index++;
+            }
+          } else if (node.nodeType === Node.ELEMENT_NODE) {
+            const tag = node.tagName.toLowerCase();
+            // Map b to strong and i to em for consistency
+            const mappedTag = {
+              'b': 'strong',
+              'i': 'em'
+            }[tag] || tag;
+            
+            if (['p', 'ul', 'li', 'strong', 'em'].includes(mappedTag)) {
+              const element = new Y.XmlElement(mappedTag);
+              const elementState = { index: 0 };
+              
+              // For lists, maintain the structure exactly as in DOM
+              if (mappedTag === 'ul') {
+                // Process all li elements in order
+                Array.from(node.children).forEach(li => {
+                  if (li.tagName.toLowerCase() === 'li') {
+                    const liElement = new Y.XmlElement('li');
+                    liElement.insert(0, [li.innerHTML]);
+                    element.insert(elementState.index, [liElement]);
+                    elementState.index++;
+                  }
+                });
+              } else {
+                Array.from(node.childNodes).forEach(child => addNode(element, child, elementState));
+              }
+              
+              parent.insert(state.index, [element]);
+              state.index++;
+            }
+          }
+        };
+        
+        const documentState = { index: 0 };
+        Array.from(div.childNodes).forEach(node => addNode(text, node, documentState));
+      });
+      isUpdating = false;
     } catch (error) {
       console.error('Error handling input:', error);
+      isUpdating = false;
     }
   });
 
