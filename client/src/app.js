@@ -127,6 +127,7 @@ const wsProvider = (doc) => {
                 console.log('Authentication successful');
                 authenticationComplete = true;
                 connectionStatus.isAuthenticated = true;
+                connectionStatus.isConnected = true;
                 // Enable editor
                 const editor = document.getElementById('editor');
                 editor.contentEditable = 'true';
@@ -134,11 +135,21 @@ const wsProvider = (doc) => {
                 statusBar.textContent = 'Connected';
                 statusBar.className = 'connected';
                 
-                // Send sync step 1 after successful authentication
+                // Force a full sync after reconnection
                 const encoder = encoding.createEncoder();
                 encoding.writeVarUint(encoder, messageSync);
                 syncProtocol.writeSyncStep1(encoder, doc);
                 sendMessage(encoding.toUint8Array(encoder));
+
+                // Also send any pending local updates
+                const update = Y.encodeStateAsUpdate(doc);
+                if (update.length > 0) {
+                  console.log('Sending pending offline changes');
+                  const updateEncoder = encoding.createEncoder();
+                  encoding.writeVarUint(updateEncoder, messageSync);
+                  syncProtocol.writeUpdate(updateEncoder, update);
+                  sendMessage(encoding.toUint8Array(updateEncoder));
+                }
               } else {
                 console.error('Authentication failed:', response.message);
                 const statusBar = document.querySelector('footer');
