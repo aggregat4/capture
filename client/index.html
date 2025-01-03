@@ -17,6 +17,7 @@
             --color-text: #6c757d;
             --color-success: #28a745;
             --color-error: #dc3545;
+            --color-warning: #ffc107;
             --color-header: #ff9f43;
             --color-shadow: rgba(0, 0, 0, 0.1);
             --color-hover-overlay: rgba(255, 255, 255, 0.2);
@@ -169,14 +170,18 @@
             color: var(--color-text-muted);
 
             &.connected {
-                color: var(--color-text-inverted);
+                color: var(--color-success);
                 font-weight: 500;
             }
 
             &.error {
-                color: var(--color-text-inverted);
+                color: var(--color-error);
                 font-weight: bold;
                 background-color: var(--color-error);
+            }
+
+            &.warning {
+                color: var(--color-warning);
             }
         }
 

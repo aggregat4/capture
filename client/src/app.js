@@ -3,6 +3,7 @@ import * as syncProtocol from 'y-protocols/sync'
 import * as awarenessProtocol from 'y-protocols/awareness'
 import * as encoding from 'lib0/encoding'
 import * as decoding from 'lib0/decoding'
+import { IndexeddbPersistence } from 'y-indexeddb'
 
 // Message types
 const messageSync = 0;
@@ -220,12 +221,29 @@ document.addEventListener('DOMContentLoaded', () => {
   let isConnected = false;
   let isUpdating = false;
 
+  // Initialize IndexedDB persistence
+  const indexeddbProvider = new IndexeddbPersistence(config.documentName, doc);
+  indexeddbProvider.on('synced', () => {
+    console.log('Content from IndexedDB loaded into the editor');
+    // Update the editor with the content from IndexedDB
+    const content = text.toString();
+    if (content && editor.textContent !== content) {
+      editor.textContent = content;
+    }
+    // Enable editing when offline data is loaded
+    editor.contentEditable = 'true';
+    if (!websocketProvider.connectionStatus.isConnected) {
+      statusBar.textContent = 'Offline - Changes will sync when online';
+      statusBar.className = 'warning';
+    }
+  });
+
   // Initialize awareness
   const awareness = new awarenessProtocol.Awareness(doc);
   awareness.setLocalState(null);
 
   // Set up WebSocket provider
-  const provider = wsProvider(doc);
+  const websocketProvider = wsProvider(doc);
 
   // Disable editor until authenticated and connected
   editor.contentEditable = 'false';
@@ -233,40 +251,47 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Handle document updates
   doc.on('update', (update, origin) => {
-    if (!provider.connectionStatus.isConnected || !provider.connectionStatus.isAuthenticated) return;
+    // Allow updates even when offline - they will be synced when we reconnect
+    if (origin === indexeddbProvider) return;
 
     console.log('Document update:', {
       updateLength: update.length,
       updateContent: Array.from(update).map(byte => byte.toString(16)).join(' '),
       origin
     });
-    // We want to send all local updates to the server
-    const encoder = encoding.createEncoder();
-    encoding.writeVarUint(encoder, messageSync);
-    syncProtocol.writeUpdate(encoder, update);
-    const message = encoding.toUint8Array(encoder);
-    console.log('Sending update to server:', {
-      messageLength: message.length,
-      messageContent: Array.from(message).map(byte => byte.toString(16)).join(' ')
-    });
-    provider.ws.send(message);
+    
+    // Only send updates to server if we're connected
+    if (websocketProvider.connectionStatus.isConnected && websocketProvider.connectionStatus.isAuthenticated) {
+      const encoder = encoding.createEncoder();
+      encoding.writeVarUint(encoder, messageSync);
+      syncProtocol.writeUpdate(encoder, update);
+      const message = encoding.toUint8Array(encoder);
+      console.log('Sending update to server:', {
+        messageLength: message.length,
+        messageContent: Array.from(message).map(byte => byte.toString(16)).join(' ')
+      });
+      websocketProvider.ws.send(message);
+    }
   });
 
-  provider.on('status', ({ status }) => {
+  websocketProvider.on('status', ({ status }) => {
     console.log('Connection status:', status);
-    provider.connectionStatus.isConnected = status === 'connected';
+    websocketProvider.connectionStatus.isConnected = status === 'connected';
     
-    if (!provider.connectionStatus.isConnected) {
-      editor.contentEditable = 'false';
-      statusBar.textContent = 'Disconnected - Editor disabled';
-      statusBar.className = '';
+    if (!websocketProvider.connectionStatus.isConnected) {
+      // When disconnected, we still allow editing if we have local data
+      editor.contentEditable = 'true';
+      statusBar.textContent = 'Offline - Changes will sync when online';
+      statusBar.className = 'warning';
+    } else {
+      statusBar.textContent = 'Connected';
+      statusBar.className = 'connected';
     }
   });
 
   // Observe changes to the shared text
   text.observe(event => {
     if (isUpdating) return;
-    if (!provider.connectionStatus.isConnected || !provider.connectionStatus.isAuthenticated) return;
     
     try {
       const newContent = event.target.toString();
@@ -303,8 +328,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Handle content editable changes
   editor.addEventListener('input', () => {
-    if (!provider.connectionStatus.isConnected || !provider.connectionStatus.isAuthenticated) return;
-    
     try {
       const content = editor.textContent;
       if (content !== text.toString()) {
@@ -322,6 +345,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Clean up on page unload
   window.addEventListener('unload', () => {
-    provider.destroy();
+    websocketProvider.destroy();
+    indexeddbProvider.destroy();
   });
 }); 

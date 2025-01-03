@@ -20,6 +20,9 @@ importers:
       ws:
         specifier: ^8.18.0
         version: 8.18.0
+      y-indexeddb:
+        specifier: ^9.0.12
+        version: 9.0.12(yjs@13.6.21)
       y-leveldb:
         specifier: ^0.1.2
         version: 0.1.2(yjs@13.6.21)
@@ -487,6 +490,12 @@ packages:
     resolution: {integrity: sha512-LKYU1iAXJXUgAXn9URjiu+MWhyUXHsvfp7mcuYm9dSUKK0/CjtrUwFAxD82/mCWbtLsGjFIad0wIsod4zrTAEQ==}
     engines: {node: '>=0.4'}
 
+  y-indexeddb@9.0.12:
+    resolution: {integrity: sha512-9oCFRSPPzBK7/w5vOkJBaVCQZKHXB/v6SIT+WYhnJxlEC61juqG0hBrAf+y3gmSMLFLwICNH9nQ53uscuse6Hg==}
+    engines: {node: '>=16.0.0', npm: '>=8.0.0'}
+    peerDependencies:
+      yjs: ^13.0.0
+
   y-leveldb@0.1.2:
     resolution: {integrity: sha512-6ulEn5AXfXJYi89rXPEg2mMHAyyw8+ZfeMMdOtBbV8FJpQ1NOrcgi6DTAcXof0dap84NjHPT2+9d0rb6cFsjEg==}
     peerDependencies:
@@ -877,6 +886,11 @@ snapshots:
   ws@8.18.0: {}
 
   xtend@4.0.2: {}
+
+  y-indexeddb@9.0.12(yjs@13.6.21):
+    dependencies:
+      lib0: 0.2.99
+      yjs: 13.6.21
 
   y-leveldb@0.1.2(yjs@13.6.21):
     dependencies:
