@@ -832,105 +832,44 @@ document.addEventListener('DOMContentLoaded', () => {
         const findYjsNode = (domNode, yjsParent) => {
           if (!yjsParent || !domNode) return null;
           
-          // Get the full path to this node from the editor root
-          const getNodePath = (node) => {
-            const path = [];
-            let current = node;
-            while (current && current !== editor) {
-              const parent = current.parentElement;
-              if (!parent) break;
-              
-              // Count same-type siblings before this node
-              let index = 0;
-              let sibling = current.previousElementSibling;
-              while (sibling) {
-                if (sibling.tagName === current.tagName) {
-                  index++;
-                }
-                sibling = sibling.previousElementSibling;
+          // Get the index of this node among siblings of the same type
+          const getDomNodeIndex = (node) => {
+            let index = 0;
+            let sibling = node.previousElementSibling;
+            while (sibling) {
+              if (sibling.tagName === node.tagName) {
+                index++;
               }
-              
-              path.unshift({
-                tag: current.tagName.toLowerCase(),
-                index,
-                content: current.textContent // Include content as part of matching
-              });
-              current = parent;
+              sibling = sibling.previousElementSibling;
             }
-            return path;
+            return index;
           };
-          
-          // Get path for the DOM node we're looking for
-          const targetPath = getNodePath(domNode);
-          console.log('Target path:', targetPath);
-          
-          // Helper to check if a Y.js node matches our target at a specific path level
-          const nodeMatchesPathLevel = (node, pathLevel) => {
-            if (!(node instanceof Y.XmlElement)) return false;
-            if (node.nodeName !== pathLevel.tag) return false;
-            
-            // For leaf nodes, also check content similarity
-            if (node.length === 0 || !node.get(0)) {
-              return true; // Empty nodes match
-            }
-            
-            // Get text content of Y.js node
-            let nodeContent = '';
-            let hasElementChildren = false;
-            node.forEach(child => {
-              if (typeof child === 'string') {
-                nodeContent += child;
-              } else if (child instanceof Y.XmlText) {
-                nodeContent += child.toString();
-              } else if (child instanceof Y.XmlElement) {
-                hasElementChildren = true;
+
+          // Find direct match in the Y.js parent
+          const nodeIndex = getDomNodeIndex(domNode);
+          const tag = domNode.tagName.toLowerCase();
+          console.log('Looking for node:', { tag, nodeIndex });
+
+          let matchCount = 0;
+          let foundNode = null;
+
+          yjsParent.forEach((node, index) => {
+            if (node instanceof Y.XmlElement && node.nodeName === tag) {
+              if (matchCount === nodeIndex) {
+                foundNode = node;
+                return false; // Break the forEach loop
               }
-            });
-            
-            // Compare content similarity if this is a leaf node (no element children)
-            if (!hasElementChildren) {
-              // Use string similarity for fuzzy matching
-              const similar = (a, b) => {
-                const normalize = str => str.trim().toLowerCase().replace(/\s+/g, ' ');
-                return normalize(a) === normalize(b);
-              };
-              return similar(nodeContent, pathLevel.content);
+              matchCount++;
             }
-            
-            return true;
-          };
-          
-          // Recursively find matching node
-          const findMatchingNode = (parent, pathIndex = 0) => {
-            if (pathIndex >= targetPath.length) return null;
-            
-            const currentPathLevel = targetPath[pathIndex];
-            let matchCount = 0;
-            let result = null;
-            
-            parent.forEach(node => {
-              if (result) return; // Stop if we found a match
-              
-              if (nodeMatchesPathLevel(node, currentPathLevel)) {
-                if (matchCount === currentPathLevel.index) {
-                  if (pathIndex === targetPath.length - 1) {
-                    // Found the final node
-                    result = node;
-                  } else if (node instanceof Y.XmlElement) {
-                    // Recurse into this node
-                    result = findMatchingNode(node, pathIndex + 1);
-                  }
-                }
-                matchCount++;
-              }
-            });
-            
-            return result;
-          };
-          
-          const result = findMatchingNode(yjsParent);
-          console.log('Found matching node:', result?.nodeName, result);
-          return result;
+          });
+
+          if (!foundNode) {
+            console.log('No matching node found. Total matches of type:', matchCount);
+          } else {
+            console.log('Found matching node at index:', nodeIndex);
+          }
+
+          return foundNode;
         };
 
         const yjsNode = findYjsNode(trackedElement, text);
