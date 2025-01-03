@@ -1,6 +1,6 @@
-# Capture - Real-time Collaborative Text Editor
+# Capture - Simple, Secure, Offline, Synced Text Document
 
-A secure, real-time collaborative text editor with offline capabilities.
+A secure, real-time collaborative text editor with offline capabilities and a simple user interface.
 
 ## Features
 
