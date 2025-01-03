@@ -13,13 +13,8 @@ export default defineConfig({
   build: {
     outDir: '../dist',
     emptyOutDir: true,
-    rollupOptions: {
-      external: ['y-indexeddb'],
-      output: {
-        globals: {
-          'y-indexeddb': 'Y_IndexedDB'
-        }
-      }
+    commonjsOptions: {
+      include: [/y-indexeddb/]
     }
   },
   optimizeDeps: {
