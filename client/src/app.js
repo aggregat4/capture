@@ -202,7 +202,7 @@ const saveConfig = (config) => {
 };
 
 // Create a WebSocket connection to our server
-const wsProvider = (doc) => {
+const wsProvider = (doc, indexeddbProvider) => {
   console.log('Creating new WebSocket connection...');
   const config = loadConfig();
   const connectionStatus = {
@@ -223,7 +223,7 @@ const wsProvider = (doc) => {
   let authenticationComplete = false;
   let reconnectAttempts = 0;
   const maxReconnectAttempts = 10;
-  const baseReconnectDelay = 1000; // Start with 1 second
+  const baseReconnectDelay = 1000;
   let reconnectTimeout = null;
   
   ws.binaryType = 'arraybuffer';
@@ -235,29 +235,13 @@ const wsProvider = (doc) => {
     }
   };
 
-  const attemptReconnect = () => {
-    reconnectAttempts++;
-    let delay;
-    
-    if (reconnectAttempts <= 5) {
-      // Use exponential backoff for the first 5 attempts
-      delay = Math.min(baseReconnectDelay * Math.pow(2, reconnectAttempts - 1), 30000);
-    } else {
-      // After 5 attempts, try every 30 seconds
-      delay = 30000;
-    }
-    
-    console.log(`Attempting to reconnect in ${delay}ms (attempt ${reconnectAttempts})`);
-    
-    const statusBar = document.querySelector('footer');
-    statusBar.textContent = `Reconnecting (attempt ${reconnectAttempts})...`;
-    statusBar.className = 'warning';
-
-    reconnectTimeout = setTimeout(() => {
-      ws = new WebSocket(wsUrl);
-      ws.binaryType = 'arraybuffer';
-      setupWebSocket(ws);
-    }, delay);
+  // Request missing updates from the server
+  const requestMissingUpdates = () => {
+    console.log('Requesting missing updates from server');
+    const encoder = encoding.createEncoder();
+    encoding.writeVarUint(encoder, messageSync);
+    syncProtocol.writeSyncStep1(encoder, doc);
+    sendMessage(encoding.toUint8Array(encoder));
   };
 
   const setupWebSocket = (socket) => {
@@ -295,21 +279,8 @@ const wsProvider = (doc) => {
                 statusBar.textContent = 'Connected';
                 statusBar.className = 'connected';
                 
-                // Force a full sync after reconnection
-                const encoder = encoding.createEncoder();
-                encoding.writeVarUint(encoder, messageSync);
-                syncProtocol.writeSyncStep1(encoder, doc);
-                sendMessage(encoding.toUint8Array(encoder));
-
-                // Also send any pending local updates
-                const update = Y.encodeStateAsUpdate(doc);
-                if (update.length > 0) {
-                  console.log('Sending pending offline changes');
-                  const updateEncoder = encoding.createEncoder();
-                  encoding.writeVarUint(updateEncoder, messageSync);
-                  syncProtocol.writeUpdate(updateEncoder, update);
-                  sendMessage(encoding.toUint8Array(updateEncoder));
-                }
+                // Request missing updates after authentication
+                requestMissingUpdates();
               } else {
                 console.error('Authentication failed:', response.message);
                 const statusBar = document.querySelector('footer');
@@ -325,11 +296,11 @@ const wsProvider = (doc) => {
         return; // Don't process any messages until authentication is complete
       }
 
-      // Handle binary messages
+      // Handle binary messages (sync protocol)
       if (event.data instanceof ArrayBuffer) {
         const message = new Uint8Array(event.data);
-        const encoder = encoding.createEncoder();
         const decoder = decoding.createDecoder(message);
+        const encoder = encoding.createEncoder();
         const messageType = decoding.readVarUint(decoder);
         console.log('Message type:', messageType === messageSync ? 'sync' : 'awareness');
         
@@ -339,24 +310,9 @@ const wsProvider = (doc) => {
             encoding.writeVarUint(encoder, messageSync);
             syncProtocol.readSyncMessage(decoder, encoder, doc, sendMessage);
             
-            // Only try to access the XmlFragment if we have a response to send
             if (encoding.length(encoder) > 1) {
-              // Make sure the XmlFragment exists
-              doc.transact(() => {
-                const xmlFragment = doc.get('editor', Y.XmlFragment);
-                if (Array.from(xmlFragment).length === 0) {
-                  const initialParagraph = new Y.XmlElement('p');
-                  initialParagraph.insert(0, ['']); // Empty paragraph
-                  xmlFragment.insert(0, [initialParagraph]);
-                }
-              });
-              
-              const response = encoding.toUint8Array(encoder);
-              console.log('Sending sync response', {
-                responseLength: response.length,
-                responseContent: Array.from(response).map(byte => byte.toString(16)).join(' ')
-              });
-              sendMessage(response);
+              console.log('Sending sync response');
+              sendMessage(encoding.toUint8Array(encoder));
             }
             break;
           }
@@ -387,14 +343,51 @@ const wsProvider = (doc) => {
         clearTimeout(reconnectTimeout);
       }
 
-      // Attempt to reconnect unless it was a clean close (e.g., user navigating away)
-      if (!event.wasClean) {
-        attemptReconnect();
+      // Attempt to reconnect unless it was a clean close
+      if (!event.wasClean && reconnectAttempts < maxReconnectAttempts) {
+        const delay = Math.min(baseReconnectDelay * Math.pow(2, reconnectAttempts), 30000);
+        console.log(`Attempting to reconnect in ${delay}ms (attempt ${reconnectAttempts + 1}/${maxReconnectAttempts})`);
+        
+        const statusBar = document.querySelector('footer');
+        statusBar.textContent = `Reconnecting (attempt ${reconnectAttempts + 1}/${maxReconnectAttempts})...`;
+        statusBar.className = 'warning';
+
+        reconnectTimeout = setTimeout(() => {
+          reconnectAttempts++;
+          ws = new WebSocket(wsUrl);
+          ws.binaryType = 'arraybuffer';
+          setupWebSocket(ws);
+        }, delay);
+      } else if (reconnectAttempts >= maxReconnectAttempts) {
+        const statusBar = document.querySelector('footer');
+        statusBar.textContent = 'Failed to reconnect - Please refresh the page';
+        statusBar.className = 'error';
       }
     };
   };
 
   setupWebSocket(ws);
+
+  // Handle document updates
+  doc.on('update', (update, origin) => {
+    // Allow updates even when offline - they will be synced when we reconnect
+    if (origin === indexeddbProvider || origin === 'indexeddb') return;
+
+    console.log('Document update:', {
+      updateLength: update.length,
+      origin
+    });
+    
+    // Only send updates to server if we're connected
+    if (connectionStatus.isConnected && connectionStatus.isAuthenticated) {
+      const encoder = encoding.createEncoder();
+      encoding.writeVarUint(encoder, messageSync);
+      syncProtocol.writeUpdate(encoder, update);
+      const message = encoding.toUint8Array(encoder);
+      console.log('Sending update to server');
+      sendMessage(message);
+    }
+  });
 
   return {
     ws,
@@ -608,8 +601,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const awareness = new awarenessProtocol.Awareness(doc);
   awareness.setLocalState(null);
 
-  // Set up WebSocket provider
-  const websocketProvider = wsProvider(doc);
+  // Set up WebSocket provider with indexeddbProvider reference
+  const websocketProvider = wsProvider(doc, indexeddbProvider);
 
   // Disable editor until authenticated and connected
   editor.contentEditable = 'false';
@@ -618,7 +611,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Handle document updates
   doc.on('update', (update, origin) => {
     // Allow updates even when offline - they will be synced when we reconnect
-    if (origin === indexeddbProvider) return;
+    if (origin === indexeddbProvider || origin === 'indexeddb') return;
 
     console.log('Document update:', {
       updateLength: update.length,

@@ -231,8 +231,7 @@ const messageListener = (conn, doc, message) => {
     debug.message('Received message', { 
       type: messageType === messageSync ? 'sync' : 'awareness', 
       docName: doc.name,
-      messageLength: message.length,
-      messageContent: Array.from(message).map(byte => byte.toString(16)).join(' ')
+      messageLength: message.length
     });
     
     switch (messageType) {
@@ -240,28 +239,14 @@ const messageListener = (conn, doc, message) => {
         debug.message('Processing sync message');
         encoding.writeVarUint(encoder, messageSync);
         
-        // Get the sync step from the message
-        const syncStep = syncProtocol.readSyncMessage(decoder, encoder, doc, conn);
-        debug.message('Sync step:', { step: syncStep });
+        // Let Y.js handle the sync protocol
+        syncProtocol.readSyncMessage(decoder, encoder, doc, conn);
         
-        if (syncStep === 1) {
-          // If this is sync step 1, send the full document state
-          const state = Y.encodeStateAsUpdate(doc);
-          const encoder2 = encoding.createEncoder();
-          encoding.writeVarUint(encoder2, messageSync);
-          syncProtocol.writeUpdate(encoder2, state);
-          const response = encoding.toUint8Array(encoder2);
-          debug.message('Sending full document state', {
-            responseLength: response.length,
-            responseContent: Array.from(response).map(byte => byte.toString(16)).join(' ')
-          });
-          send(doc, conn, response);
-        } else if (encoding.length(encoder) > 1) {
-          // For other sync steps, send the normal response
+        // Only send response if we have one
+        if (encoding.length(encoder) > 1) {
           const response = encoding.toUint8Array(encoder);
           debug.message('Sending sync response', {
-            responseLength: response.length,
-            responseContent: Array.from(response).map(byte => byte.toString(16)).join(' ')
+            responseLength: response.length
           });
           send(doc, conn, response);
         } else {
