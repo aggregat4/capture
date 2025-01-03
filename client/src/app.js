@@ -224,7 +224,10 @@ const wsProvider = (doc, indexeddbProvider) => {
   let reconnectAttempts = 0;
   const maxReconnectAttempts = 10;
   const baseReconnectDelay = 1000;
+  const maxReconnectDelay = 30000;
+  const longPollingInterval = 60000; // 1 minute
   let reconnectTimeout = null;
+  let isLongPolling = false;
   
   ws.binaryType = 'arraybuffer';
   
@@ -244,10 +247,38 @@ const wsProvider = (doc, indexeddbProvider) => {
     sendMessage(encoding.toUint8Array(encoder));
   };
 
+  const attemptReconnect = () => {
+    const delay = reconnectAttempts < maxReconnectAttempts
+      ? Math.min(baseReconnectDelay * Math.pow(2, reconnectAttempts), maxReconnectDelay)
+      : longPollingInterval;
+
+    isLongPolling = reconnectAttempts >= maxReconnectAttempts;
+    
+    console.log(
+      isLongPolling
+        ? `Polling for server availability every ${delay/1000} seconds`
+        : `Attempting to reconnect in ${delay}ms (attempt ${reconnectAttempts + 1}/${maxReconnectAttempts})`
+    );
+    
+    const statusBar = document.querySelector('footer');
+    statusBar.textContent = isLongPolling
+      ? `Offline - Checking for server every ${delay/1000} seconds`
+      : `Reconnecting (attempt ${reconnectAttempts + 1}/${maxReconnectAttempts})...`;
+    statusBar.className = 'warning';
+
+    reconnectTimeout = setTimeout(() => {
+      reconnectAttempts++;
+      ws = new WebSocket(wsUrl);
+      ws.binaryType = 'arraybuffer';
+      setupWebSocket(ws);
+    }, delay);
+  };
+
   const setupWebSocket = (socket) => {
     socket.onopen = () => {
       console.log('WebSocket connection opened successfully');
-      reconnectAttempts = 0; // Reset reconnection attempts on successful connection
+      reconnectAttempts = 0;
+      isLongPolling = false;
       const statusBar = document.querySelector('footer');
       statusBar.textContent = 'Authenticating...';
       console.log("Sending auth message");
@@ -344,24 +375,8 @@ const wsProvider = (doc, indexeddbProvider) => {
       }
 
       // Attempt to reconnect unless it was a clean close
-      if (!event.wasClean && reconnectAttempts < maxReconnectAttempts) {
-        const delay = Math.min(baseReconnectDelay * Math.pow(2, reconnectAttempts), 30000);
-        console.log(`Attempting to reconnect in ${delay}ms (attempt ${reconnectAttempts + 1}/${maxReconnectAttempts})`);
-        
-        const statusBar = document.querySelector('footer');
-        statusBar.textContent = `Reconnecting (attempt ${reconnectAttempts + 1}/${maxReconnectAttempts})...`;
-        statusBar.className = 'warning';
-
-        reconnectTimeout = setTimeout(() => {
-          reconnectAttempts++;
-          ws = new WebSocket(wsUrl);
-          ws.binaryType = 'arraybuffer';
-          setupWebSocket(ws);
-        }, delay);
-      } else if (reconnectAttempts >= maxReconnectAttempts) {
-        const statusBar = document.querySelector('footer');
-        statusBar.textContent = 'Failed to reconnect - Please refresh the page';
-        statusBar.className = 'error';
+      if (!event.wasClean) {
+        attemptReconnect();
       }
     };
   };
