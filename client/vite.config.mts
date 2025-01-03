@@ -13,9 +13,6 @@ export default defineConfig({
   build: {
     outDir: '../dist',
     emptyOutDir: true,
-    commonjsOptions: {
-      include: [/y-indexeddb/]
-    }
   },
   optimizeDeps: {
     include: ['yjs', 'lib0', 'y-indexeddb']
