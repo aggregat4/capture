@@ -286,6 +286,70 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   })
 
+  // Extract full sync into a shared function
+  const performFullSync = (doc: Y.Doc, text: Y.XmlFragment, editor: HTMLElement, editorState: EditorState) => {
+    console.log('Performing full sync')
+    const dirtyContent = editor.innerHTML
+    const cleanContent = wrapInParagraphs(dirtyContent)
+    
+    editorState.isUpdating = true
+    doc.transact(() => {
+      // Clear existing content
+      text.delete(0, text.length)
+      
+      // Parse the HTML and create XML elements
+      const div = document.createElement('div')
+      div.innerHTML = cleanContent
+      
+      const addNode = (parent: Y.XmlFragment, node: Node, state = { index: 0 }) => {
+        if (node.nodeType === Node.TEXT_NODE && node.textContent) {
+          const trimmedContent = node.textContent.trim()
+          if (trimmedContent) {
+            parent.insert(state.index, [new Y.XmlText(node.textContent)])
+            state.index++
+          }
+        } else if (node.nodeType === Node.ELEMENT_NODE && node instanceof HTMLElement) {
+          const tag = node.tagName.toLowerCase()
+          // Map b to strong and i to em for consistency
+          const mappedTag = {
+            'b': 'strong',
+            'i': 'em'
+          }[tag] || tag
+          
+          if (['p', 'ul', 'li', 'strong', 'em'].includes(mappedTag)) {
+            const xmlElement = new Y.XmlElement(mappedTag)
+            const elementState = { index: 0 }
+            
+            if (mappedTag === 'ul') {
+              // Process all li elements in order
+              Array.from(node.children).forEach(child => {
+                if (child instanceof HTMLElement && child.tagName.toLowerCase() === 'li') {
+                  const liElement = new Y.XmlElement('li')
+                  liElement.insert(0, [new Y.XmlText(child.innerHTML)])
+                  xmlElement.insert(elementState.index, [liElement])
+                  elementState.index++
+                }
+              })
+            } else {
+              Array.from(node.childNodes).forEach(child => {
+                addNode(xmlElement, child, elementState)
+              })
+            }
+            
+            parent.insert(state.index, [xmlElement])
+            state.index++
+          }
+        }
+      }
+      
+      const documentState = { index: 0 }
+      Array.from(div.childNodes).forEach(child => {
+        addNode(text, child, documentState)
+      })
+    })
+    editorState.isUpdating = false
+  }
+
   // Handle content editable changes
   editor.addEventListener('input', () => {
     try {
@@ -315,65 +379,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // If this is a multi-element change, do a full sync
       if (isMultiElementChange()) {
         console.log('Handling multi-element change with full sync')
-        const dirtyContent = editor.innerHTML
-        const cleanContent = wrapInParagraphs(dirtyContent)
-        
-        editorState.isUpdating = true
-        doc.transact(() => {
-          // Clear existing content
-          text.delete(0, text.length)
-          
-          // Parse the HTML and create XML elements
-          const div = document.createElement('div')
-          div.innerHTML = cleanContent
-          
-          const addNode = (parent: Y.XmlFragment, node: Node, state = { index: 0 }) => {
-            if (node.nodeType === Node.TEXT_NODE && node.textContent) {
-              const trimmedContent = node.textContent.trim()
-              if (trimmedContent) {
-                parent.insert(state.index, [new Y.XmlText(node.textContent)])
-                state.index++
-              }
-            } else if (node.nodeType === Node.ELEMENT_NODE && node instanceof HTMLElement) {
-              const tag = node.tagName.toLowerCase()
-              // Map b to strong and i to em for consistency
-              const mappedTag = {
-                'b': 'strong',
-                'i': 'em'
-              }[tag] || tag
-              
-              if (['p', 'ul', 'li', 'strong', 'em'].includes(mappedTag)) {
-                const xmlElement = new Y.XmlElement(mappedTag)
-                const elementState = { index: 0 }
-                
-                if (mappedTag === 'ul') {
-                  // Process all li elements in order
-                  Array.from(node.children).forEach(child => {
-                    if (child instanceof HTMLElement && child.tagName.toLowerCase() === 'li') {
-                      const liElement = new Y.XmlElement('li')
-                      liElement.insert(0, [new Y.XmlText(child.innerHTML)])
-                      xmlElement.insert(elementState.index, [liElement])
-                      elementState.index++
-                    }
-                  })
-                } else {
-                  Array.from(node.childNodes).forEach(child => {
-                    addNode(xmlElement, child, elementState)
-                  })
-                }
-                
-                parent.insert(state.index, [xmlElement])
-                state.index++
-              }
-            }
-          }
-          
-          const documentState = { index: 0 }
-          Array.from(div.childNodes).forEach(child => {
-            addNode(text, child, documentState)
-          })
-        })
-        editorState.isUpdating = false
+        performFullSync(doc, text, editor, editorState)
         return
       }
 
@@ -490,65 +496,7 @@ document.addEventListener('DOMContentLoaded', () => {
       console.log('Falling back to full sync')
       // If we couldn't find a matching node or if the change was at the root level,
       // fall back to full sync
-      const dirtyContent = editor.innerHTML
-      const cleanContent = wrapInParagraphs(dirtyContent)
-      
-      editorState.isUpdating = true
-      doc.transact(() => {
-        // Clear existing content
-        text.delete(0, text.length)
-        
-        // Parse the HTML and create XML elements
-        const div = document.createElement('div')
-        div.innerHTML = cleanContent
-        
-        const addNode = (parent: Y.XmlFragment, node: Node, state = { index: 0 }) => {
-          if (node.nodeType === Node.TEXT_NODE && node.textContent) {
-            const trimmedContent = node.textContent.trim()
-            if (trimmedContent) {
-              parent.insert(state.index, [new Y.XmlText(node.textContent)])
-              state.index++
-            }
-          } else if (node.nodeType === Node.ELEMENT_NODE && node instanceof HTMLElement) {
-            const tag = node.tagName.toLowerCase()
-            // Map b to strong and i to em for consistency
-            const mappedTag = {
-              'b': 'strong',
-              'i': 'em'
-            }[tag] || tag
-            
-            if (['p', 'ul', 'li', 'strong', 'em'].includes(mappedTag)) {
-              const xmlElement = new Y.XmlElement(mappedTag)
-              const elementState = { index: 0 }
-              
-              if (mappedTag === 'ul') {
-                // Process all li elements in order
-                Array.from(node.children).forEach(child => {
-                  if (child instanceof HTMLElement && child.tagName.toLowerCase() === 'li') {
-                    const liElement = new Y.XmlElement('li')
-                    liElement.insert(0, [new Y.XmlText(child.innerHTML)])
-                    xmlElement.insert(elementState.index, [liElement])
-                    elementState.index++
-                  }
-                })
-              } else {
-                Array.from(node.childNodes).forEach(child => {
-                  addNode(xmlElement, child, elementState)
-                })
-              }
-              
-              parent.insert(state.index, [xmlElement])
-              state.index++
-            }
-          }
-        }
-        
-        const documentState = { index: 0 }
-        Array.from(div.childNodes).forEach(child => {
-          addNode(text, child, documentState)
-        })
-      })
-      editorState.isUpdating = false
+      performFullSync(doc, text, editor, editorState)
     } catch (error) {
       console.error('Error handling input:', error)
       editorState.isUpdating = false
