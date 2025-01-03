@@ -12,19 +12,22 @@
     "generate-pwa-assets": "node scripts/generate-pwa-assets.js"
   },
   "dependencies": {
+    "dompurify": "^3.0.9",
     "dotenv": "^16.4.7",
     "lib0": "^0.2.99",
+    "sharp": "^0.32.5",
     "source-map-support": "^0.5.21",
     "ws": "^8.18.0",
     "y-indexeddb": "^9.0.12",
     "y-leveldb": "^0.1.2",
     "y-protocols": "^1.0.6",
-    "yjs": "^13.6.21",
-    "sharp": "^0.32.5",
-    "dompurify": "^3.0.9"
+    "yjs": "^13.6.21"
   },
   "devDependencies": {
+    "@types/ws": "^8.5.13",
     "concurrently": "^8.2.2",
-    "vite": "^4.5.5"
+    "typescript": "^5.7.2",
+    "vite": "^4.5.5",
+    "vite-plugin-pwa": "^0.21.1"
   }
 }
