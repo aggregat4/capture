@@ -30,6 +30,153 @@ import * as awarenessProtocol from 'y-protocols/awareness'
 import * as encoding from 'lib0/encoding'
 import * as decoding from 'lib0/decoding'
 import { IndexeddbPersistence } from 'y-indexeddb'
+import DOMPurify from 'dompurify';
+
+// Configure DOMPurify to allow specific formatting tags
+const purifyConfig = {
+  ALLOWED_TAGS: ['p', 'strong', 'em', 'b', 'i', 'ul', 'li', 'br'],
+  ALLOWED_ATTR: [],
+  KEEP_CONTENT: true,
+  // Ensure empty paragraphs are preserved
+  ALLOW_EMPTY_TAGS: ['p', 'li']
+};
+
+// Helper to ensure content is properly wrapped in paragraphs
+const wrapInParagraphs = (html) => {
+  const div = document.createElement('div');
+  div.innerHTML = DOMPurify.sanitize(html, purifyConfig);
+  
+  // Convert text nodes and br tags at the root level into paragraphs
+  const fragment = document.createDocumentFragment();
+  let currentP = null;
+  
+  Array.from(div.childNodes).forEach(node => {
+    if (node.nodeType === Node.TEXT_NODE || node.nodeName === 'BR') {
+      if (!currentP) {
+        currentP = document.createElement('p');
+        fragment.appendChild(currentP);
+      }
+      currentP.appendChild(node.cloneNode(true));
+      if (node.nodeName === 'BR') {
+        currentP = null;
+      }
+    } else {
+      currentP = null;
+      fragment.appendChild(node.cloneNode(true));
+    }
+  });
+  
+  // If we have a pending paragraph with content, append it
+  if (currentP && currentP.textContent.trim()) {
+    fragment.appendChild(currentP);
+  }
+  
+  div.innerHTML = '';
+  div.appendChild(fragment);
+  return div.innerHTML;
+};
+
+// Convert HTML to plain text while preserving structure
+const htmlToPlainText = (html) => {
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  
+  const walk = (node) => {
+    let text = '';
+    
+    if (node.nodeType === Node.TEXT_NODE) {
+      return node.textContent;
+    }
+    
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const tag = node.tagName.toLowerCase();
+      const children = Array.from(node.childNodes).map(walk).join('');
+      
+      switch (tag) {
+        case 'p':
+          // If this paragraph is empty or only contains whitespace/breaks
+          if (!children.trim()) {
+            return '\n';
+          }
+          return children + '\n';
+        case 'br':
+          return '\n';
+        case 'ul':
+          return children;
+        case 'li':
+          return '• ' + children + '\n';
+        case 'strong':
+          return `<strong>${children}</strong>`;
+        case 'em':
+          return `<em>${children}</em>`;
+        default:
+          return children;
+      }
+    }
+    
+    return '';
+  };
+  
+  return walk(div).replace(/\n{3,}/g, '\n\n').trim() + '\n';
+};
+
+// Convert plain text to HTML with proper structure
+const plainTextToHtml = (text) => {
+  if (!text) return '';
+  
+  // Since we're now dealing with HTML content, not just plain text
+  // We'll parse it as HTML first to preserve formatting tags
+  const tempDiv = document.createElement('div');
+  tempDiv.innerHTML = text;
+  
+  const lines = tempDiv.innerHTML.split('\n');
+  let inList = false;
+  let html = '';
+  let skipNextEmptyLine = false;
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmedLine = line.trim();
+    const isLastLine = i === lines.length - 1;
+    
+    if (trimmedLine.startsWith('•')) {
+      skipNextEmptyLine = false;
+      // Start a new list if we're not in one
+      if (!inList) {
+        html += '<ul>';
+        inList = true;
+      }
+      // Remove the bullet point but preserve any HTML tags inside
+      html += `<li>${trimmedLine.substring(1).trim()}</li>`;
+    } else {
+      // End the list if we were in one
+      if (inList) {
+        html += '</ul>';
+        inList = false;
+        skipNextEmptyLine = true;
+      }
+      
+      // Handle empty lines
+      if (!trimmedLine) {
+        if (!skipNextEmptyLine && !isLastLine) {
+          html += '<p></p>';
+        }
+        skipNextEmptyLine = false;
+      } else {
+        skipNextEmptyLine = false;
+        // Preserve any HTML tags in the line
+        html += `<p>${trimmedLine}</p>`;
+      }
+    }
+  }
+  
+  // Close any open list
+  if (inList) {
+    html += '</ul>';
+  }
+  
+  return html;
+};
 
 // Message types
 const messageSync = 0;
@@ -191,8 +338,19 @@ const wsProvider = (doc) => {
             console.log('Processing sync message');
             encoding.writeVarUint(encoder, messageSync);
             syncProtocol.readSyncMessage(decoder, encoder, doc, sendMessage);
-            console.log('Current document content:', doc.getText('editor').toString());
+            
+            // Only try to access the XmlFragment if we have a response to send
             if (encoding.length(encoder) > 1) {
+              // Make sure the XmlFragment exists
+              doc.transact(() => {
+                const xmlFragment = doc.get('editor', Y.XmlFragment);
+                if (Array.from(xmlFragment).length === 0) {
+                  const initialParagraph = new Y.XmlElement('p');
+                  initialParagraph.insert(0, ['']); // Empty paragraph
+                  xmlFragment.insert(0, [initialParagraph]);
+                }
+              });
+              
               const response = encoding.toUint8Array(encoder);
               console.log('Sending sync response', {
                 responseLength: response.length,
@@ -275,12 +433,101 @@ const wsProvider = (doc) => {
   };
 };
 
+// Convert XmlFragment to text content
+const getXmlFragmentContent = (xmlFragment) => {
+  let content = '';
+  xmlFragment.forEach(item => {
+    if (typeof item === 'string') {
+      content += item;
+    } else if (item instanceof Y.XmlText) {
+      content += item.toString();
+    } else if (item instanceof Y.XmlElement) {
+      const tag = item.nodeName;
+      const innerContent = getXmlFragmentContent(item);
+      switch (tag) {
+        case 'p':
+          content += innerContent + '\n';
+          break;
+        case 'ul':
+          content += innerContent + '\n';
+          break;
+        case 'li':
+          content += '• ' + innerContent + '\n';
+          break;
+        case 'strong':
+        case 'b':
+          content += `<strong>${innerContent}</strong>`;
+          break;
+        case 'em':
+        case 'i':
+          content += `<em>${innerContent}</em>`;
+          break;
+        default:
+          content += innerContent;
+      }
+    }
+  });
+  return content.trim();
+};
+
 // Initialize the editor when the DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
   const editor = document.getElementById('editor');
   const statusBar = document.querySelector('footer');
   const configSection = document.querySelector('.config-section');
   const configToggle = document.querySelector('.config-toggle');
+  const toolbar = document.querySelector('.toolbar');
+  
+  // Handle formatting buttons
+  toolbar.addEventListener('click', (e) => {
+    const button = e.target.closest('button');
+    if (!button) return;
+    
+    e.preventDefault();
+    const format = button.dataset.format;
+    
+    switch (format) {
+      case 'bold':
+        document.execCommand('bold', false);
+        break;
+      case 'italic':
+        document.execCommand('italic', false);
+        break;
+      case 'list':
+        document.execCommand('insertUnorderedList', false);
+        break;
+    }
+    
+    // Update button state based on current selection
+    updateToolbarState();
+    
+    // Force an input event to sync changes
+    editor.dispatchEvent(new Event('input'));
+  });
+  
+  // Update toolbar state based on current selection
+  const updateToolbarState = () => {
+    const buttons = toolbar.querySelectorAll('button');
+    buttons.forEach(button => {
+      const format = button.dataset.format;
+      switch (format) {
+        case 'bold':
+          button.classList.toggle('active', document.queryCommandState('bold'));
+          break;
+        case 'italic':
+          button.classList.toggle('active', document.queryCommandState('italic'));
+          break;
+        case 'list':
+          button.classList.toggle('active', document.queryCommandState('insertUnorderedList'));
+          break;
+      }
+    });
+  };
+  
+  // Update toolbar state when selection changes
+  editor.addEventListener('keyup', updateToolbarState);
+  editor.addEventListener('mouseup', updateToolbarState);
+  editor.addEventListener('selectionchange', updateToolbarState);
   
   // Load and display current config
   const config = loadConfig();
@@ -304,24 +551,56 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   const doc = new Y.Doc();
-  const text = doc.getText('editor');
+  
+  // Initialize the shared type first
+  const text = doc.get('editor', Y.XmlFragment);
+  
+  // Create initial structure in a transaction
+  doc.transact(() => {
+    // Use Array.from to safely check length
+    if (Array.from(text).length === 0) {
+      const initialParagraph = new Y.XmlElement('p');
+      initialParagraph.insert(0, ['']); // Empty paragraph
+      text.insert(0, [initialParagraph]);
+    }
+  });
+  
   let isConnected = false;
   let isUpdating = false;
 
   // Initialize IndexedDB persistence
   const indexeddbProvider = new IndexeddbPersistence(config.documentName, doc);
+  
+  // Wait for IndexedDB to load
+  let hasLoadedFromIndexedDB = false;
+  
   indexeddbProvider.on('synced', () => {
     console.log('Content from IndexedDB loaded into the editor');
-    // Update the editor with the content from IndexedDB
-    const content = text.toString();
-    if (content && editor.textContent !== content) {
-      editor.textContent = content;
-    }
-    // Enable editing when offline data is loaded
-    editor.contentEditable = 'true';
-    if (!websocketProvider.connectionStatus.isConnected) {
-      statusBar.textContent = 'Offline';
-      statusBar.className = 'warning';
+    if (hasLoadedFromIndexedDB) return; // Only load from IndexedDB once
+    hasLoadedFromIndexedDB = true;
+    
+    try {
+      // Get the initial content
+      const content = getXmlFragmentContent(text);
+      console.log('Loaded content:', content);
+      
+      // Convert to HTML with proper structure
+      const htmlContent = plainTextToHtml(content);
+      console.log('Converted to HTML:', htmlContent);
+      
+      // Update editor with sanitized HTML
+      if (htmlContent) {
+        editor.innerHTML = DOMPurify.sanitize(htmlContent, purifyConfig);
+      }
+      
+      // Enable editing
+      editor.contentEditable = 'true';
+      if (!websocketProvider.connectionStatus.isConnected) {
+        statusBar.textContent = 'Offline';
+        statusBar.className = 'warning';
+      }
+    } catch (error) {
+      console.error('Error loading content from IndexedDB:', error);
     }
   });
 
@@ -381,8 +660,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (isUpdating) return;
     
     try {
-      const newContent = event.target.toString();
-      if (editor && editor.textContent !== newContent) {
+      const content = getXmlFragmentContent(text);
+      const htmlContent = plainTextToHtml(content);
+      
+      if (editor && editor.innerHTML !== htmlContent) {
         // Store current selection if it exists
         let cursorPosition = null;
         const selection = window.getSelection();
@@ -391,21 +672,57 @@ document.addEventListener('DOMContentLoaded', () => {
           if (range && editor.contains(range.startContainer)) {
             cursorPosition = {
               start: range.startOffset,
-              end: range.endOffset
+              end: range.endOffset,
+              startContainer: range.startContainer,
+              endContainer: range.endContainer
             };
           }
         }
 
-        // Update content
-        editor.textContent = newContent;
+        // Update content with sanitized and structured HTML
+        editor.innerHTML = DOMPurify.sanitize(htmlContent, purifyConfig);
 
         // Restore cursor position if we had one
-        if (cursorPosition && editor.firstChild) {
-          const newRange = document.createRange();
-          newRange.setStart(editor.firstChild, Math.min(cursorPosition.start, newContent.length));
-          newRange.setEnd(editor.firstChild, Math.min(cursorPosition.end, newContent.length));
-          selection.removeAllRanges();
-          selection.addRange(newRange);
+        if (cursorPosition && selection) {
+          try {
+            // Try to find equivalent positions in the new DOM
+            const newRange = document.createRange();
+            
+            // Find the closest matching position in the new DOM
+            const findEquivalentNode = (oldNode, root) => {
+              if (oldNode === editor) return root;
+              const path = [];
+              let node = oldNode;
+              while (node && node !== editor) {
+                const parent = node.parentNode;
+                if (!parent) break;
+                path.unshift(Array.from(parent.childNodes).indexOf(node));
+                node = parent;
+              }
+              
+              // Follow the same path in the new DOM
+              let newNode = root;
+              for (const index of path) {
+                if (newNode.childNodes[index]) {
+                  newNode = newNode.childNodes[index];
+                } else {
+                  return null;
+                }
+              }
+              return newNode;
+            };
+            
+            const newStartNode = findEquivalentNode(cursorPosition.startContainer, editor) || editor;
+            const newEndNode = findEquivalentNode(cursorPosition.endContainer, editor) || editor;
+            
+            newRange.setStart(newStartNode, Math.min(cursorPosition.start, newStartNode.textContent.length));
+            newRange.setEnd(newEndNode, Math.min(cursorPosition.end, newEndNode.textContent.length));
+            
+            selection.removeAllRanges();
+            selection.addRange(newRange);
+          } catch (error) {
+            console.error('Error restoring cursor position:', error);
+          }
         }
       }
     } catch (error) {
@@ -416,12 +733,49 @@ document.addEventListener('DOMContentLoaded', () => {
   // Handle content editable changes
   editor.addEventListener('input', () => {
     try {
-      const content = editor.textContent;
-      if (content !== text.toString()) {
+      const dirtyContent = editor.innerHTML;
+      // Sanitize and structure the HTML content
+      const cleanContent = wrapInParagraphs(dirtyContent);
+      // Convert to plain text while preserving structure
+      const plainText = htmlToPlainText(cleanContent);
+      
+      const currentContent = getXmlFragmentContent(text);
+      if (plainText !== currentContent) {
         isUpdating = true;
         doc.transact(() => {
+          // Clear existing content
           text.delete(0, text.length);
-          text.insert(0, content);
+          
+          // Parse the HTML and create XML elements
+          const div = document.createElement('div');
+          div.innerHTML = cleanContent;
+          
+          const addNode = (parent, node, state = { index: 0 }) => {
+            if (node.nodeType === Node.TEXT_NODE) {
+              if (node.textContent.trim()) {
+                parent.insert(state.index, [node.textContent]);
+                state.index++;
+              }
+            } else if (node.nodeType === Node.ELEMENT_NODE) {
+              const tag = node.tagName.toLowerCase();
+              // Map b to strong and i to em for consistency
+              const mappedTag = {
+                'b': 'strong',
+                'i': 'em'
+              }[tag] || tag;
+              
+              if (['p', 'ul', 'li', 'strong', 'em'].includes(mappedTag)) {
+                const element = new Y.XmlElement(mappedTag);
+                const elementState = { index: 0 };
+                Array.from(node.childNodes).forEach(child => addNode(element, child, elementState));
+                parent.insert(state.index, [element]);
+                state.index++;
+              }
+            }
+          };
+          
+          const documentState = { index: 0 };
+          Array.from(div.childNodes).forEach(node => addNode(text, node, documentState));
         });
         isUpdating = false;
       }

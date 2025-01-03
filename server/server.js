@@ -127,6 +127,10 @@ class WSSharedDoc extends Y.Doc {
     this.conns = new Map();
     this.awareness = new awarenessProtocol.Awareness(this);
     this.awareness.setLocalState(null);
+    
+    // Initialize the XmlFragment
+    this.get('editor', Y.XmlFragment);
+    
     debug.document('Created new document', { name });
 
     // Load initial state from storage
@@ -232,7 +236,7 @@ const messageListener = (conn, doc, message) => {
     });
     
     switch (messageType) {
-      case messageSync:
+      case messageSync: {
         debug.message('Processing sync message');
         encoding.writeVarUint(encoder, messageSync);
         
@@ -249,8 +253,7 @@ const messageListener = (conn, doc, message) => {
           const response = encoding.toUint8Array(encoder2);
           debug.message('Sending full document state', {
             responseLength: response.length,
-            responseContent: Array.from(response).map(byte => byte.toString(16)).join(' '),
-            docContent: doc.getText('editor').toString()
+            responseContent: Array.from(response).map(byte => byte.toString(16)).join(' ')
           });
           send(doc, conn, response);
         } else if (encoding.length(encoder) > 1) {
@@ -258,14 +261,14 @@ const messageListener = (conn, doc, message) => {
           const response = encoding.toUint8Array(encoder);
           debug.message('Sending sync response', {
             responseLength: response.length,
-            responseContent: Array.from(response).map(byte => byte.toString(16)).join(' '),
-            docContent: doc.getText('editor').toString()
+            responseContent: Array.from(response).map(byte => byte.toString(16)).join(' ')
           });
           send(doc, conn, response);
         } else {
           debug.message('No sync response needed');
         }
         break;
+      }
       case messageAwareness:
         awarenessProtocol.applyAwarenessUpdate(
           doc.awareness,
@@ -313,12 +316,16 @@ const send = (doc, conn, m) => {
 
 // Add debug logging for document state
 const logDocumentState = (doc) => {
-  const state = doc.getText('editor').toString();
-  debug.document('Current document state:', {
-    name: doc.name,
-    length: state.length,
-    content: state
-  });
+  try {
+    const xmlFragment = doc.get('editor', Y.XmlFragment);
+    debug.document('Current document state:', {
+      name: doc.name,
+      type: 'XmlFragment',
+      isEmpty: xmlFragment.length === 0
+    });
+  } catch (err) {
+    debug.error('Error logging document state:', err);
+  }
 };
 
 const setupWSConnection = (
