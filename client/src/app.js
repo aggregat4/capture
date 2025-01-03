@@ -59,8 +59,12 @@ const wsProvider = (doc) => {
   
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = `${protocol}//${window.location.host}/ws/${config.documentName}`;
-  const ws = new WebSocket(wsUrl);
+  let ws = new WebSocket(wsUrl);
   let authenticationComplete = false;
+  let reconnectAttempts = 0;
+  const maxReconnectAttempts = 10;
+  const baseReconnectDelay = 1000; // Start with 1 second
+  let reconnectTimeout = null;
   
   ws.binaryType = 'arraybuffer';
   
@@ -70,108 +74,154 @@ const wsProvider = (doc) => {
       ws.send(message);
     }
   };
-  
-  ws.onopen = () => {
-    console.log('WebSocket connection opened successfully');
+
+  const attemptReconnect = () => {
+    reconnectAttempts++;
+    let delay;
+    
+    if (reconnectAttempts <= 5) {
+      // Use exponential backoff for the first 5 attempts
+      delay = Math.min(baseReconnectDelay * Math.pow(2, reconnectAttempts - 1), 30000);
+    } else {
+      // After 5 attempts, try every 30 seconds
+      delay = 30000;
+    }
+    
+    console.log(`Attempting to reconnect in ${delay}ms (attempt ${reconnectAttempts})`);
+    
     const statusBar = document.querySelector('footer');
-    statusBar.textContent = 'Authenticating...';
-    console.log("Sending auth message");
-    const authMessage = {
-      type: 'auth',
-      password: config.password
+    statusBar.textContent = `Reconnecting (attempt ${reconnectAttempts})...`;
+    statusBar.className = 'warning';
+
+    reconnectTimeout = setTimeout(() => {
+      ws = new WebSocket(wsUrl);
+      ws.binaryType = 'arraybuffer';
+      setupWebSocket(ws);
+    }, delay);
+  };
+
+  const setupWebSocket = (socket) => {
+    socket.onopen = () => {
+      console.log('WebSocket connection opened successfully');
+      reconnectAttempts = 0; // Reset reconnection attempts on successful connection
+      const statusBar = document.querySelector('footer');
+      statusBar.textContent = 'Authenticating...';
+      console.log("Sending auth message");
+      const authMessage = {
+        type: 'auth',
+        password: config.password
+      };
+      sendMessage(JSON.stringify(authMessage));
     };
-    // ws.send(JSON.stringify(authMessage));
-    sendMessage(JSON.stringify(authMessage));
-  };
-  
-  ws.onmessage = (event) => {
-    console.log('Received WebSocket message');
-    
-    // Handle authentication response
-    if (!authenticationComplete) {
-      if (typeof event.data === 'string') {
-        try {
-          const response = JSON.parse(event.data);
-          if (response.type === 'auth') {
-            if (response.status === 'success') {
-              console.log('Authentication successful');
-              authenticationComplete = true;
-              connectionStatus.isAuthenticated = true;
-              // Enable editor
-              const editor = document.getElementById('editor');
-              editor.contentEditable = 'true';
-              const statusBar = document.querySelector('footer');
-              statusBar.textContent = 'Connected';
-              statusBar.className = 'connected';
-              
-              // Send sync step 1 after successful authentication
-              const encoder = encoding.createEncoder();
-              encoding.writeVarUint(encoder, messageSync);
-              syncProtocol.writeSyncStep1(encoder, doc);
-              sendMessage(encoding.toUint8Array(encoder));
-            } else {
-              console.error('Authentication failed:', response.message);
-              const statusBar = document.querySelector('footer');
-              statusBar.textContent = 'Authentication failed - Invalid password';
-              statusBar.className = 'error';
-              ws.close();
-            }
-          }
-        } catch (e) {
-          console.error('Error parsing auth response:', e);
-        }
-      }
-      return; // Don't process any messages until authentication is complete
-    }
-    
-    // Handle binary messages
-    if (event.data instanceof ArrayBuffer) {
-      const message = new Uint8Array(event.data);
-      const encoder = encoding.createEncoder();
-      const decoder = decoding.createDecoder(message);
-      const messageType = decoding.readVarUint(decoder);
-      console.log('Message type:', messageType === messageSync ? 'sync' : 'awareness');
+
+    socket.onmessage = (event) => {
+      console.log('Received WebSocket message');
       
-      switch (messageType) {
-        case messageSync: {
-          console.log('Processing sync message');
-          encoding.writeVarUint(encoder, messageSync);
-          syncProtocol.readSyncMessage(decoder, encoder, doc, sendMessage);
-          console.log('Current document content:', doc.getText('editor').toString());
-          if (encoding.length(encoder) > 1) {
-            const response = encoding.toUint8Array(encoder);
-            console.log('Sending sync response', {
-              responseLength: response.length,
-              responseContent: Array.from(response).map(byte => byte.toString(16)).join(' ')
-            });
-            sendMessage(response);
+      // Handle authentication response
+      if (!authenticationComplete) {
+        if (typeof event.data === 'string') {
+          try {
+            const response = JSON.parse(event.data);
+            if (response.type === 'auth') {
+              if (response.status === 'success') {
+                console.log('Authentication successful');
+                authenticationComplete = true;
+                connectionStatus.isAuthenticated = true;
+                // Enable editor
+                const editor = document.getElementById('editor');
+                editor.contentEditable = 'true';
+                const statusBar = document.querySelector('footer');
+                statusBar.textContent = 'Connected';
+                statusBar.className = 'connected';
+                
+                // Send sync step 1 after successful authentication
+                const encoder = encoding.createEncoder();
+                encoding.writeVarUint(encoder, messageSync);
+                syncProtocol.writeSyncStep1(encoder, doc);
+                sendMessage(encoding.toUint8Array(encoder));
+              } else {
+                console.error('Authentication failed:', response.message);
+                const statusBar = document.querySelector('footer');
+                statusBar.textContent = 'Authentication failed - Invalid password';
+                statusBar.className = 'error';
+                socket.close();
+              }
+            }
+          } catch (e) {
+            console.error('Error parsing auth response:', e);
           }
-          break;
         }
-        case messageAwareness:
-          awarenessProtocol.applyAwarenessUpdate(doc.awareness, decoding.readVarUint8Array(decoder), null);
-          break;
+        return; // Don't process any messages until authentication is complete
       }
-    }
+
+      // Handle binary messages
+      if (event.data instanceof ArrayBuffer) {
+        const message = new Uint8Array(event.data);
+        const encoder = encoding.createEncoder();
+        const decoder = decoding.createDecoder(message);
+        const messageType = decoding.readVarUint(decoder);
+        console.log('Message type:', messageType === messageSync ? 'sync' : 'awareness');
+        
+        switch (messageType) {
+          case messageSync: {
+            console.log('Processing sync message');
+            encoding.writeVarUint(encoder, messageSync);
+            syncProtocol.readSyncMessage(decoder, encoder, doc, sendMessage);
+            console.log('Current document content:', doc.getText('editor').toString());
+            if (encoding.length(encoder) > 1) {
+              const response = encoding.toUint8Array(encoder);
+              console.log('Sending sync response', {
+                responseLength: response.length,
+                responseContent: Array.from(response).map(byte => byte.toString(16)).join(' ')
+              });
+              sendMessage(response);
+            }
+            break;
+          }
+          case messageAwareness:
+            awarenessProtocol.applyAwarenessUpdate(doc.awareness, decoding.readVarUint8Array(decoder), null);
+            break;
+        }
+      }
+    };
+
+    socket.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+
+    socket.onclose = (event) => {
+      console.log('WebSocket connection closed', {
+        code: event.code,
+        reason: event.reason,
+        wasClean: event.wasClean
+      });
+      
+      authenticationComplete = false;
+      connectionStatus.isAuthenticated = false;
+      connectionStatus.isConnected = false;
+
+      // Clear any existing reconnect timeout
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+      }
+
+      // Attempt to reconnect unless it was a clean close (e.g., user navigating away)
+      if (!event.wasClean) {
+        attemptReconnect();
+      }
+    };
   };
 
-  ws.onerror = (error) => {
-    console.error('WebSocket error:', error);
-  };
-
-  ws.onclose = (event) => {
-    console.log('WebSocket connection closed', {
-      code: event.code,
-      reason: event.reason,
-      wasClean: event.wasClean
-    });
-  };
+  setupWebSocket(ws);
 
   return {
     ws,
     connectionStatus,
     destroy: () => {
       console.log('Destroying WebSocket connection');
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+      }
       ws.close();
     },
     on: (event, callback) => {
